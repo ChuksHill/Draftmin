@@ -11,33 +11,26 @@ export function MeetingLayout({
   children: ReactNode;
   controls?: ReactNode;
 }) {
+  const hasSidebar = Boolean(sidebar);
   return (
-    <div className="h-screen w-full bg-slate-50 text-slate-900 flex flex-col">
-      
-      {/* HEADER */}
-      <div className="h-20 border-b border-slate-200 flex items-center px-6 bg-white shadow-sm">
+    <div className="h-screen w-full bg-[#0B0F19] text-white flex flex-col">
+      <div className="h-14 border-b border-white/10 flex items-center px-4 md:px-6 bg-[#0B0F19]/95 backdrop-blur supports-[backdrop-filter]:bg-[#0B0F19]/80">
         {header}
       </div>
 
-      {/* BODY */}
-      <div className="flex flex-1 overflow-hidden">
-        
-        {/* MAIN AREA */}
-        <div className="flex-1 relative bg-slate-50 overflow-y-auto">
-          {children}
-        </div>
+      <div className="flex flex-1 min-h-0 overflow-hidden">
+        <div className="flex-1 min-w-0 relative">{children}</div>
 
-        {/* SIDEBAR */}
-        <div className="w-[320px] border-l border-slate-200 bg-slate-100 overflow-y-auto">
-          {sidebar}
-        </div>
+        {hasSidebar ? (
+          <div className="w-[360px] border-l border-white/10 bg-[#0B0F19]">
+            {sidebar}
+          </div>
+        ) : null}
       </div>
 
-      {/* CONTROLS */}
-      <div className="h-24 border-t border-slate-200 flex items-center justify-center bg-white px-6">
+      <div className="h-[92px] border-t border-white/10 flex items-center justify-center bg-[#0B0F19]/95 px-3 md:px-6 backdrop-blur supports-[backdrop-filter]:bg-[#0B0F19]/80">
         {controls}
       </div>
-
     </div>
   );
 }

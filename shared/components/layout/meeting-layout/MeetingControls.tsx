@@ -1,33 +1,296 @@
-export function MeetingControls() {
+"use client";
+
+import { ReactNode, useCallback, useMemo, useState } from "react";
+import { DisconnectButton, StartAudio, useRoomContext } from "@livekit/components-react";
+
+export type MeetingPanel = "participants" | "chat" | "captions" | null;
+
+type MeetingControlsProps = {
+  activePanel?: MeetingPanel;
+  onTogglePanel?: (panel: Exclude<MeetingPanel, null>) => void;
+  onDeviceError?: (error: Error) => void;
+};
+
+function ControlIcon({ children }: { children: ReactNode }) {
+  return <span className="h-5 w-5">{children}</span>;
+}
+
+function IconMic({ muted }: { muted: boolean }) {
   return (
-    <div className="flex flex-wrap items-center justify-center gap-3 px-4">
-      <button className="px-4 py-2 rounded-2xl bg-white text-slate-700 border border-slate-200 shadow-sm hover:bg-slate-50 transition text-sm">
-        🎤 Mute
-      </button>
+    <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
+      <path
+        d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M19 11a7 7 0 0 1-14 0"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path d="M12 18v3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M8 21h8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      {muted ? (
+        <path d="M5 5l14 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      ) : null}
+    </svg>
+  );
+}
 
-      <button className="px-4 py-2 rounded-2xl bg-white text-slate-700 border border-slate-200 shadow-sm hover:bg-slate-50 transition text-sm">
-        🎥 Video
-      </button>
+function IconCamera({ muted }: { muted: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
+      <path
+        d="M4.5 7.5A2.5 2.5 0 0 1 7 5h7a2.5 2.5 0 0 1 2.5 2.5v9A2.5 2.5 0 0 1 14 19H7a2.5 2.5 0 0 1-2.5-2.5v-9Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <path
+        d="M16.5 10.2 21 7.5v9l-4.5-2.7v-3.6Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      {muted ? (
+        <path d="M5 5l14 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      ) : null}
+    </svg>
+  );
+}
 
-      <button className="px-4 py-2 rounded-2xl bg-white text-slate-700 border border-slate-200 shadow-sm hover:bg-slate-50 transition text-sm">
-        � Captions
-      </button>
+function IconShare({ active }: { active: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
+      <path d="M12 16V4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path
+        d="M7.5 8.5 12 4l4.5 4.5"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M5 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      {active ? (
+        <path d="M12 18h0" stroke="currentColor" strokeWidth="6" strokeLinecap="round" />
+      ) : null}
+    </svg>
+  );
+}
 
-      <button className="px-4 py-2 rounded-2xl bg-white text-slate-700 border border-slate-200 shadow-sm hover:bg-slate-50 transition text-sm">
-        🪟 Share
-      </button>
+function IconUsers() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
+      <path d="M16 18.5c0-2 2-3.5 4-3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path
+        d="M4 18.5c0-2 2.7-3.5 6-3.5s6 1.5 6 3.5"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path d="M10 12.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M18 12a2.5 2.5 0 1 0 0-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
 
-      <button className="px-4 py-2 rounded-2xl bg-white text-slate-700 border border-slate-200 shadow-sm hover:bg-slate-50 transition text-sm">
-        👥 Participants
-      </button>
+function IconChat() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
+      <path
+        d="M7 17.5H6a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v7.5a3 3 0 0 1-3 3h-6.5L7 21v-3.5Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path d="M7.5 9.5h9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M7.5 12.5h6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
 
-      <button className="px-4 py-2 rounded-2xl bg-white text-slate-700 border border-slate-200 shadow-sm hover:bg-slate-50 transition text-sm">
-        💬 Chat
-      </button>
+function IconCaptions() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
+      <path
+        d="M4.5 6.5A2.5 2.5 0 0 1 7 4h10a2.5 2.5 0 0 1 2.5 2.5v9A2.5 2.5 0 0 1 17 18H7a2.5 2.5 0 0 1-2.5-2.5v-9Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <path d="M8 11h3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M13 11h3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M8 14h8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
 
-      <button className="px-4 py-2 rounded-2xl bg-red-600 hover:bg-red-700 transition text-sm text-white shadow-sm">
-        End Call
-      </button>
+function ControlButton({
+  label,
+  active,
+  onClick,
+  icon,
+}: {
+  label: string;
+  active?: boolean;
+  onClick?: () => void;
+  icon: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={[
+        "group flex w-[74px] flex-col items-center justify-center gap-1 rounded-xl px-2 py-2 text-xs",
+        "border border-white/10 bg-white/5 hover:bg-white/10 transition",
+        active ? "ring-1 ring-emerald-400/50 border-emerald-400/30" : "",
+      ].join(" ")}
+    >
+      <span className="text-white/90">{icon}</span>
+      <span className="text-white/70 group-hover:text-white/90">{label}</span>
+    </button>
+  );
+}
+
+export function MeetingControls({ activePanel, onTogglePanel, onDeviceError }: MeetingControlsProps) {
+  const room = useRoomContext();
+
+  const [micEnabled, setMicEnabled] = useState(() => room.localParticipant.isMicrophoneEnabled);
+  const [cameraEnabled, setCameraEnabled] = useState(() => room.localParticipant.isCameraEnabled);
+  const [screenShareEnabled, setScreenShareEnabled] = useState(
+    () => room.localParticipant.isScreenShareEnabled,
+  );
+
+  const reportDeviceError = useCallback(
+    (error: unknown) => {
+      const normalized = error instanceof Error ? error : new Error(String(error));
+      onDeviceError?.(normalized);
+    },
+    [onDeviceError],
+  );
+
+  const toggleMic = useCallback(async () => {
+    try {
+      const next = !micEnabled;
+      await room.localParticipant.setMicrophoneEnabled(next);
+      setMicEnabled(next);
+    } catch (error) {
+      reportDeviceError(error);
+    }
+  }, [micEnabled, reportDeviceError, room.localParticipant]);
+
+  const toggleCamera = useCallback(async () => {
+    try {
+      const next = !cameraEnabled;
+      await room.localParticipant.setCameraEnabled(next);
+      setCameraEnabled(next);
+    } catch (error) {
+      reportDeviceError(error);
+    }
+  }, [cameraEnabled, reportDeviceError, room.localParticipant]);
+
+  const toggleScreenShare = useCallback(async () => {
+    try {
+      const next = !screenShareEnabled;
+      await room.localParticipant.setScreenShareEnabled(next);
+      setScreenShareEnabled(next);
+    } catch (error) {
+      reportDeviceError(error);
+    }
+  }, [reportDeviceError, room.localParticipant, screenShareEnabled]);
+
+  const togglePanel = useMemo(() => {
+    return (panel: Exclude<MeetingPanel, null>) => onTogglePanel?.(panel);
+  }, [onTogglePanel]);
+
+  return (
+    <div className="w-full flex items-center justify-between gap-3">
+      <div className="hidden md:flex items-center gap-2">
+        <StartAudio
+          className="h-9 rounded-xl border border-white/10 bg-white/5 px-3 text-xs text-white/80 hover:bg-white/10 transition"
+          label="Enable audio playback"
+        />
+      </div>
+
+      <div className="flex flex-1 items-center justify-center gap-2">
+        <ControlButton
+          label={micEnabled ? "Mute" : "Unmute"}
+          onClick={toggleMic}
+          icon={
+            <ControlIcon>
+              <IconMic muted={!micEnabled} />
+            </ControlIcon>
+          }
+          active={!micEnabled}
+        />
+        <ControlButton
+          label={cameraEnabled ? "Stop Video" : "Start Video"}
+          onClick={toggleCamera}
+          icon={
+            <ControlIcon>
+              <IconCamera muted={!cameraEnabled} />
+            </ControlIcon>
+          }
+          active={!cameraEnabled}
+        />
+        <ControlButton
+          label={screenShareEnabled ? "Stop Share" : "Share"}
+          onClick={toggleScreenShare}
+          icon={
+            <ControlIcon>
+              <IconShare active={screenShareEnabled} />
+            </ControlIcon>
+          }
+          active={screenShareEnabled}
+        />
+
+        <div className="hidden md:block h-9 w-px bg-white/10 mx-1" />
+
+        <ControlButton
+          label="Participants"
+          onClick={() => togglePanel("participants")}
+          icon={
+            <ControlIcon>
+              <IconUsers />
+            </ControlIcon>
+          }
+          active={activePanel === "participants"}
+        />
+        <ControlButton
+          label="Chat"
+          onClick={() => togglePanel("chat")}
+          icon={
+            <ControlIcon>
+              <IconChat />
+            </ControlIcon>
+          }
+          active={activePanel === "chat"}
+        />
+        <ControlButton
+          label="Captions"
+          onClick={() => togglePanel("captions")}
+          icon={
+            <ControlIcon>
+              <IconCaptions />
+            </ControlIcon>
+          }
+          active={activePanel === "captions"}
+        />
+      </div>
+
+      <div className="flex items-center justify-end">
+        <DisconnectButton
+          className="h-10 rounded-xl bg-red-600 px-4 text-sm font-semibold text-white hover:bg-red-700 transition"
+          stopTracks
+        >
+          End
+        </DisconnectButton>
+      </div>
     </div>
   );
 }

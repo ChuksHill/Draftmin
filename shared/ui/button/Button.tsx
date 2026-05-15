@@ -16,9 +16,9 @@ export function Button({
   ...props
 }: ButtonProps) {
   const variants = {
-    primary: 'bg-gradient-to-r from-blue-500 to-purple-600 text-white hover:opacity-90',
-    secondary: 'bg-gray-100 text-gray-900 hover:bg-gray-200 border border-gray-300',
-    ghost: 'text-gray-900 hover:bg-gray-100',
+    primary: 'bg-blue-600 text-white hover:bg-blue-700',
+    secondary: 'bg-white text-slate-700 hover:bg-slate-50 border border-slate-200',
+    ghost: 'text-slate-700 hover:bg-slate-100',
   };
 
   const sizes = {
@@ -30,7 +30,7 @@ export function Button({
   return (
     <button
       className={cn(
-        'font-semibold rounded-lg transition inline-flex items-center justify-center',
+        'font-semibold rounded-xl transition inline-flex items-center justify-center',
         variants[variant],
         sizes[size],
         className
