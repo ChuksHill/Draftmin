@@ -1,5 +1,7 @@
 'use client';
 
+import { motion } from 'framer-motion';
+
 function IconVideo() {
   return (
     <svg viewBox="0 0 24 24" fill="none" className="h-6 w-6" aria-hidden="true">
@@ -173,7 +175,7 @@ export function FeaturesSection() {
   return (
     <section id="features" className="py-20 bg-white border-t border-slate-200">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center mb-16">
+        <div className="text-center mb-16" data-aos="fade-up">
           <p className="text-sm font-semibold uppercase tracking-[0.24em] text-blue-600">Features</p>
           <h2 className="mt-4 text-4xl sm:text-5xl font-bold text-slate-900">Built for focused meetings</h2>
           <p className="text-lg text-slate-600 max-w-2xl mx-auto mt-4">
@@ -182,21 +184,24 @@ export function FeaturesSection() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-          {features.map((feature) => (
-            <div
+          {features.map((feature, index) => (
+            <motion.div
               key={feature.title}
               className="p-6 rounded-3xl border border-slate-200 bg-[#F6F8FC] hover:bg-slate-50 transition"
+              data-aos="fade-up"
+              data-aos-delay={index * 70}
+              whileHover={{ y: -4, scale: 1.01 }}
+              transition={{ type: 'spring', stiffness: 260, damping: 18 }}
             >
               <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-600 text-white">
                 {feature.icon}
               </div>
               <h3 className="mt-5 text-lg font-semibold text-slate-900">{feature.title}</h3>
               <p className="mt-2 text-slate-600 leading-relaxed">{feature.description}</p>
-            </div>
+            </motion.div>
           ))}
         </div>
       </div>
     </section>
   );
 }
-

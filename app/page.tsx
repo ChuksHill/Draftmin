@@ -5,10 +5,12 @@ import { AboutSection } from "@/shared/components/sections/AboutSection";
 import { TestimonialsSection } from "@/shared/components/sections/TestimonialsSection";
 import { PricingSection } from "@/shared/components/sections/PricingSection";
 import { CTASection } from "@/shared/components/sections/CTASection";
+import { AOSInit } from "@/shared/components/effects/AOSInit";
 
 export default function Home() {
   return (
     <div className="min-h-screen bg-[#F6F8FC] text-slate-900">
+      <AOSInit />
       <Header />
       <HeroSection />
       <FeaturesSection />

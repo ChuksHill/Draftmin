@@ -1,7 +1,7 @@
 "use client";
 
 import { ReactNode, useCallback, useMemo, useState } from "react";
-import { DisconnectButton, StartAudio, useRoomContext } from "@livekit/components-react";
+import { DisconnectButton, StartAudio, useLocalParticipant, useRoomContext } from "@livekit/components-react";
 
 export type MeetingPanel = "participants" | "chat" | "captions" | null;
 
@@ -135,19 +135,22 @@ function ControlButton({
   active,
   onClick,
   icon,
+  disabled,
 }: {
   label: string;
   active?: boolean;
   onClick?: () => void;
   icon: ReactNode;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       className={[
         "group flex w-[74px] flex-col items-center justify-center gap-1 rounded-xl px-2 py-2 text-xs",
-        "border border-white/10 bg-white/5 hover:bg-white/10 transition",
+        "border border-white/10 bg-white/5 hover:bg-white/10 transition disabled:opacity-40 disabled:cursor-not-allowed",
         active ? "ring-1 ring-emerald-400/50 border-emerald-400/30" : "",
       ].join(" ")}
     >
@@ -159,12 +162,11 @@ function ControlButton({
 
 export function MeetingControls({ activePanel, onTogglePanel, onDeviceError }: MeetingControlsProps) {
   const room = useRoomContext();
+  const { localParticipant, isMicrophoneEnabled, isCameraEnabled, isScreenShareEnabled } = useLocalParticipant();
 
-  const [micEnabled, setMicEnabled] = useState(() => room.localParticipant.isMicrophoneEnabled);
-  const [cameraEnabled, setCameraEnabled] = useState(() => room.localParticipant.isCameraEnabled);
-  const [screenShareEnabled, setScreenShareEnabled] = useState(
-    () => room.localParticipant.isScreenShareEnabled,
-  );
+  const [togglingMic, setTogglingMic] = useState(false);
+  const [togglingCamera, setTogglingCamera] = useState(false);
+  const [togglingScreen, setTogglingScreen] = useState(false);
 
   const reportDeviceError = useCallback(
     (error: unknown) => {
@@ -175,34 +177,40 @@ export function MeetingControls({ activePanel, onTogglePanel, onDeviceError }: M
   );
 
   const toggleMic = useCallback(async () => {
+    if (togglingMic) return;
+    setTogglingMic(true);
     try {
-      const next = !micEnabled;
-      await room.localParticipant.setMicrophoneEnabled(next);
-      setMicEnabled(next);
+      await localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled);
     } catch (error) {
       reportDeviceError(error);
+    } finally {
+      setTogglingMic(false);
     }
-  }, [micEnabled, reportDeviceError, room.localParticipant]);
+  }, [isMicrophoneEnabled, togglingMic, reportDeviceError, localParticipant]);
 
   const toggleCamera = useCallback(async () => {
+    if (togglingCamera) return;
+    setTogglingCamera(true);
     try {
-      const next = !cameraEnabled;
-      await room.localParticipant.setCameraEnabled(next);
-      setCameraEnabled(next);
+      await localParticipant.setCameraEnabled(!isCameraEnabled);
     } catch (error) {
       reportDeviceError(error);
+    } finally {
+      setTogglingCamera(false);
     }
-  }, [cameraEnabled, reportDeviceError, room.localParticipant]);
+  }, [isCameraEnabled, togglingCamera, reportDeviceError, localParticipant]);
 
   const toggleScreenShare = useCallback(async () => {
+    if (togglingScreen) return;
+    setTogglingScreen(true);
     try {
-      const next = !screenShareEnabled;
-      await room.localParticipant.setScreenShareEnabled(next);
-      setScreenShareEnabled(next);
+      await localParticipant.setScreenShareEnabled(!isScreenShareEnabled);
     } catch (error) {
       reportDeviceError(error);
+    } finally {
+      setTogglingScreen(false);
     }
-  }, [reportDeviceError, room.localParticipant, screenShareEnabled]);
+  }, [isScreenShareEnabled, togglingScreen, reportDeviceError, localParticipant]);
 
   const togglePanel = useMemo(() => {
     return (panel: Exclude<MeetingPanel, null>) => onTogglePanel?.(panel);
@@ -219,34 +227,37 @@ export function MeetingControls({ activePanel, onTogglePanel, onDeviceError }: M
 
       <div className="flex flex-1 items-center justify-center gap-2">
         <ControlButton
-          label={micEnabled ? "Mute" : "Unmute"}
+          label={togglingMic ? "Syncing..." : isMicrophoneEnabled ? "Mute" : "Unmute"}
           onClick={toggleMic}
+          disabled={togglingMic}
           icon={
             <ControlIcon>
-              <IconMic muted={!micEnabled} />
+              <IconMic muted={!isMicrophoneEnabled} />
             </ControlIcon>
           }
-          active={!micEnabled}
+          active={!isMicrophoneEnabled}
         />
         <ControlButton
-          label={cameraEnabled ? "Stop Video" : "Start Video"}
+          label={togglingCamera ? "Syncing..." : isCameraEnabled ? "Stop Video" : "Start Video"}
           onClick={toggleCamera}
+          disabled={togglingCamera}
           icon={
             <ControlIcon>
-              <IconCamera muted={!cameraEnabled} />
+              <IconCamera muted={!isCameraEnabled} />
             </ControlIcon>
           }
-          active={!cameraEnabled}
+          active={!isCameraEnabled}
         />
         <ControlButton
-          label={screenShareEnabled ? "Stop Share" : "Share"}
+          label={togglingScreen ? "Sharing..." : isScreenShareEnabled ? "Stop Share" : "Share"}
           onClick={toggleScreenShare}
+          disabled={togglingScreen}
           icon={
             <ControlIcon>
-              <IconShare active={screenShareEnabled} />
+              <IconShare active={isScreenShareEnabled} />
             </ControlIcon>
           }
-          active={screenShareEnabled}
+          active={isScreenShareEnabled}
         />
 
         <div className="hidden md:block h-9 w-px bg-white/10 mx-1" />

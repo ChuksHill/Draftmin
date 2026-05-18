@@ -203,6 +203,16 @@ export function PreJoinScreen({ roomName }: PreJoinScreenProps) {
                   const safeName = displayName.trim().length > 0 ? displayName.trim() : "Guest";
                   window.localStorage.setItem("draftmin.displayName", safeName);
 
+                  try {
+                    stream?.getTracks().forEach((track) => track.stop());
+                  } catch {
+                    // ignore
+                  }
+                  setStream(null);
+                  if (videoRef.current) {
+                    videoRef.current.srcObject = null;
+                  }
+
                   const base = sanitizeIdentity(safeName) || "guest";
                   const suffix = crypto.randomUUID().slice(0, 6);
                   const identity = `${base}-${suffix}`;

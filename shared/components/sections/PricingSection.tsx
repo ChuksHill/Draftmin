@@ -1,5 +1,7 @@
 'use client';
 
+import { motion } from 'framer-motion';
+
 function CheckIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
@@ -60,7 +62,7 @@ export function PricingSection() {
   return (
     <section id="pricing" className="py-20 bg-[#F6F8FC] border-t border-slate-200">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center mb-16">
+        <div className="text-center mb-16" data-aos="fade-up">
           <p className="text-sm font-semibold uppercase tracking-[0.24em] text-blue-600">Pricing</p>
           <h2 className="mt-4 text-4xl sm:text-5xl font-bold text-slate-900">Simple, transparent plans</h2>
           <p className="text-lg text-slate-600 max-w-2xl mx-auto mt-4">
@@ -69,8 +71,8 @@ export function PricingSection() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-          {plans.map((plan) => (
-            <div
+          {plans.map((plan, index) => (
+            <motion.div
               key={plan.name}
               className={[
                 'rounded-3xl border bg-white shadow-sm transition',
@@ -78,6 +80,10 @@ export function PricingSection() {
                   ? 'border-blue-300 ring-2 ring-blue-100 md:scale-[1.02]'
                   : 'border-slate-200 hover:shadow-md',
               ].join(' ')}
+              data-aos="fade-up"
+              data-aos-delay={index * 90}
+              whileHover={{ y: -4, scale: plan.highlighted ? 1.02 : 1.01 }}
+              transition={{ type: 'spring', stiffness: 260, damping: 18 }}
             >
               <div className="p-8">
                 <h3 className="text-2xl font-bold text-slate-900 mb-2">{plan.name}</h3>
@@ -111,11 +117,10 @@ export function PricingSection() {
                   ))}
                 </ul>
               </div>
-            </div>
+            </motion.div>
           ))}
         </div>
       </div>
     </section>
   );
 }
-

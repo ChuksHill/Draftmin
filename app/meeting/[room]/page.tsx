@@ -4,24 +4,28 @@ export const metadata = {
   title: "Meeting - Draftmin",
 };
 
-export default function MeetingRoomPage({
+export default async function MeetingRoomPage({
   params,
   searchParams,
 }: {
-  params: { room: string };
-  searchParams: { identity?: string; name?: string; mic?: string; cam?: string };
+  params: Promise<{ room: string }>;
+  searchParams: Promise<{ identity?: string; name?: string; mic?: string; cam?: string }>;
 }) {
-  const identity = searchParams.identity ?? `guest-${params.room}`;
-  const title = searchParams.name ? `${searchParams.name} • Draftmin` : "Draftmin Meeting";
+  const resolvedParams = await params;
+  const resolvedSearchParams = await searchParams;
+
+  const room = resolvedParams.room;
+  const identity = resolvedSearchParams.identity ?? `guest-${room}-${Math.floor(1000 + Math.random() * 9000)}`;
+  const title = resolvedSearchParams.name ? `${resolvedSearchParams.name} • Draftmin` : "Draftmin Meeting";
 
   return (
     <LiveMeetingRoom
-      key={`${params.room}:${identity}`}
-      roomName={params.room}
+      key={`${room}:${identity}`}
+      roomName={room}
       identity={identity}
       title={title}
-      startWithMic={searchParams.mic !== "0"}
-      startWithCamera={searchParams.cam === "1"}
+      startWithMic={resolvedSearchParams.mic !== "0"}
+      startWithCamera={resolvedSearchParams.cam === "1"}
     />
   );
 }

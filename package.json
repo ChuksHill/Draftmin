@@ -11,6 +11,8 @@
   "dependencies": {
     "@livekit/components-react": "^2.9.21",
     "@supabase/supabase-js": "^2.105.4",
+    "aos": "^2.3.4",
+    "framer-motion": "^12.38.0",
     "livekit-client": "^2.19.0",
     "livekit-server-sdk": "^2.15.3",
     "next": "16.2.6",
