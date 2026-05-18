@@ -1,14 +1,14 @@
 "use client";
 
 import { ReactNode, useCallback, useMemo, useState } from "react";
-import { DisconnectButton, StartAudio, useLocalParticipant, useRoomContext } from "@livekit/components-react";
+import { StartAudio, useLocalParticipant, useRoomContext } from "@livekit/components-react";
 
 export type MeetingPanel = "participants" | "chat" | "captions" | null;
 
 type MeetingControlsProps = {
   activePanel?: MeetingPanel;
   onTogglePanel?: (panel: Exclude<MeetingPanel, null>) => void;
-  onDeviceError?: (error: Error) => void;
+  onDeviceError?: (error: Error | null) => void;
 };
 
 function ControlIcon({ children }: { children: ReactNode }) {
@@ -181,36 +181,39 @@ export function MeetingControls({ activePanel, onTogglePanel, onDeviceError }: M
     setTogglingMic(true);
     try {
       await localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled);
+      onDeviceError?.(null);
     } catch (error) {
       reportDeviceError(error);
     } finally {
       setTogglingMic(false);
     }
-  }, [isMicrophoneEnabled, togglingMic, reportDeviceError, localParticipant]);
+  }, [isMicrophoneEnabled, togglingMic, reportDeviceError, localParticipant, onDeviceError]);
 
   const toggleCamera = useCallback(async () => {
     if (togglingCamera) return;
     setTogglingCamera(true);
     try {
       await localParticipant.setCameraEnabled(!isCameraEnabled);
+      onDeviceError?.(null);
     } catch (error) {
       reportDeviceError(error);
     } finally {
       setTogglingCamera(false);
     }
-  }, [isCameraEnabled, togglingCamera, reportDeviceError, localParticipant]);
+  }, [isCameraEnabled, togglingCamera, reportDeviceError, localParticipant, onDeviceError]);
 
   const toggleScreenShare = useCallback(async () => {
     if (togglingScreen) return;
     setTogglingScreen(true);
     try {
       await localParticipant.setScreenShareEnabled(!isScreenShareEnabled);
+      onDeviceError?.(null);
     } catch (error) {
       reportDeviceError(error);
     } finally {
       setTogglingScreen(false);
     }
-  }, [isScreenShareEnabled, togglingScreen, reportDeviceError, localParticipant]);
+  }, [isScreenShareEnabled, togglingScreen, reportDeviceError, localParticipant, onDeviceError]);
 
   const togglePanel = useMemo(() => {
     return (panel: Exclude<MeetingPanel, null>) => onTogglePanel?.(panel);
@@ -295,12 +298,15 @@ export function MeetingControls({ activePanel, onTogglePanel, onDeviceError }: M
       </div>
 
       <div className="flex items-center justify-end">
-        <DisconnectButton
+        <button
+          type="button"
+          onClick={() => {
+            room.disconnect(true);
+          }}
           className="h-10 rounded-xl bg-red-600 px-4 text-sm font-semibold text-white hover:bg-red-700 transition"
-          stopTracks
         >
           End
-        </DisconnectButton>
+        </button>
       </div>
     </div>
   );

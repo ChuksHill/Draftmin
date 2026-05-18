@@ -32,6 +32,7 @@ export function PreJoinScreen({ roomName }: PreJoinScreenProps) {
   const [micOn, setMicOn] = useState(true);
   const [displayName, setDisplayName] = useState("Guest");
   const [deviceError, setDeviceError] = useState<string | null>(null);
+  const [isPermissionPending, setIsPermissionPending] = useState(false);
 
   const avatarInitials = useMemo(() => initialsFromName(displayName), [displayName]);
 
@@ -56,11 +57,57 @@ export function PreJoinScreen({ roomName }: PreJoinScreenProps) {
         return;
       }
 
+      setIsPermissionPending(true);
       try {
-        const next = await navigator.mediaDevices.getUserMedia({
-          video: cameraOn,
-          audio: micOn,
-        });
+        let next: MediaStream;
+        try {
+          next = await navigator.mediaDevices.getUserMedia({
+            video: cameraOn,
+            audio: micOn,
+          });
+        } catch (err) {
+          // If combined request fails, try to request separately to isolate which device is failing
+          if (cameraOn && micOn) {
+            console.warn("Combined getUserMedia failed, trying isolated tracks...", err);
+            let videoStream: MediaStream | null = null;
+            let audioStream: MediaStream | null = null;
+            let cameraError: any = null;
+            let micError: any = null;
+
+            try {
+              videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
+            } catch (vErr) {
+              cameraError = vErr;
+              setCameraOn(false); // Disable camera in UI since it's blocked/in-use
+            }
+
+            try {
+              audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            } catch (aErr) {
+              micError = aErr;
+              setMicOn(false); // Disable microphone in UI since it's blocked/in-use
+            }
+
+            if (videoStream || audioStream) {
+              const combined = new MediaStream();
+              videoStream?.getVideoTracks().forEach((t) => combined.addTrack(t));
+              audioStream?.getAudioTracks().forEach((t) => combined.addTrack(t));
+              next = combined;
+
+              if (cameraError || micError) {
+                const failedDevice = cameraError && micError ? "camera and microphone" : cameraError ? "camera" : "microphone";
+                const errDetail = (cameraError || micError) instanceof Error ? (cameraError || micError).message : String(cameraError || micError);
+                setDeviceError(`Could not access ${failedDevice}: ${errDetail}`);
+              }
+            } else {
+              // Both failed, throw original error
+              throw err;
+            }
+          } else {
+            // Already single request failed, propagate error
+            throw err;
+          }
+        }
 
         if (cancelled) {
           next.getTracks().forEach((track) => track.stop());
@@ -76,6 +123,8 @@ export function PreJoinScreen({ roomName }: PreJoinScreenProps) {
         }
       } catch (error) {
         setDeviceError(error instanceof Error ? error.message : String(error));
+      } finally {
+        setIsPermissionPending(false);
       }
     }
 
@@ -247,6 +296,23 @@ export function PreJoinScreen({ roomName }: PreJoinScreenProps) {
           </aside>
         </div>
       </main>
+
+      {isPermissionPending && (
+        <div className="fixed inset-0 z-[9999] flex items-start justify-center bg-[#0B0F19]/40 p-4 backdrop-blur-[2px]">
+          <div className="mt-12 flex max-w-md animate-bounce items-center gap-3 rounded-2xl border border-blue-500/30 bg-[#0B0F19]/95 p-4 text-white shadow-[0_0_50px_rgba(0,0,0,0.5)] ring-2 ring-blue-500/20 backdrop-blur-xl">
+            <span className="relative flex h-3.5 w-3.5 shrink-0">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-75"></span>
+              <span className="relative inline-flex h-3.5 w-3.5 rounded-full bg-blue-500"></span>
+            </span>
+            <div className="text-left">
+              <h4 className="text-sm font-semibold text-blue-400">Browser Permissions Required</h4>
+              <p className="mt-1 text-xs text-white/90 leading-relaxed">
+                Draftmin wants to access your camera and microphone. Please click <strong>Allow</strong> in the browser prompt at the top of your screen.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

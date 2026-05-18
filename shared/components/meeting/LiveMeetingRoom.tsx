@@ -5,6 +5,7 @@ import {
   LiveKitRoom,
   RoomAudioRenderer,
   useChat,
+  useLocalParticipant,
   useParticipants,
   useTracks,
   VideoTrack,
@@ -383,89 +384,83 @@ function MeetingStage() {
   );
 }
 
-export function LiveMeetingRoom({
-  roomName,
-  identity,
-  title = "Draftmin Meeting",
-  startWithMic = true,
-  startWithCamera = false,
-}: LiveMeetingRoomProps) {
-  const [tokenData, setTokenData] = useState<TokenResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [deviceError, setDeviceError] = useState<string | null>(null);
-  const [activePanel, setActivePanel] = useState<MeetingPanel>(null);
-  const [captions, setCaptions] = useState<string[]>([]);
-  const [interimCaption, setInterimCaption] = useState<string>("");
-  const [captionError, setCaptionError] = useState<string | null>(null);
+function getFriendlyDeviceErrorMessage(errorMsg: string): { title: string; description: string; suggestion: string } {
+  const msg = errorMsg.toLowerCase();
+  
+  if (msg.includes("permission") || msg.includes("allowed") || msg.includes("notallowederror")) {
+    return {
+      title: "Camera or Microphone Access Denied",
+      description: "Your browser or operating system has blocked Draftmin from accessing your camera or microphone.",
+      suggestion: "Please click the lock/settings icon next to the URL in your browser's address bar and set Camera/Microphone permissions to 'Allow'. Also ensure camera access is enabled in your OS privacy settings."
+    };
+  }
+  
+  if (msg.includes("readable") || msg.includes("trackstart") || msg.includes("in use") || msg.includes("concurrent")) {
+    return {
+      title: "Camera or Microphone in Use",
+      description: "Another application (like Zoom, Microsoft Teams, OBS, or another browser tab) is currently using your camera or microphone.",
+      suggestion: "Please close any other apps or tabs that might be using your media devices, then try starting your video or audio again."
+    };
+  }
+  
+  if (msg.includes("notfound") || msg.includes("devicesnotfound") || msg.includes("no device")) {
+    return {
+      title: "No Media Device Found",
+      description: "We couldn't detect any connected camera or microphone on your system.",
+      suggestion: "Make sure your webcam or microphone is properly plugged in, powered on, and recognized by your system settings."
+    };
+  }
+
+  if (msg.includes("overconstrained") || msg.includes("constraint")) {
+    return {
+      title: "Hardware Constraint Error",
+      description: "Your camera doesn't support the requested video quality or resolution settings.",
+      suggestion: "We will automatically lower the resolution settings to match your device. Try toggling the video off and on again."
+    };
+  }
+
+  return {
+    title: "Media Device Error",
+    description: errorMsg,
+    suggestion: "Check your connections, ensure no other app is using the device, and verify browser permissions."
+  };
+}
+
+type RoomTranscriptionControllerProps = {
+  sttDisabled: boolean;
+  sttLang: string;
+  sttChunkMs: number;
+  speechRecognitionAvailable: boolean;
+  sttProviderOrder: SttProvider[];
+  onCaptionsChange: (updater: (current: string[]) => string[]) => void;
+  onInterimCaptionChange: (caption: string) => void;
+  onCaptionErrorChange: (error: string | null) => void;
+};
+
+function RoomTranscriptionController({
+  sttDisabled,
+  sttLang,
+  sttChunkMs,
+  speechRecognitionAvailable,
+  sttProviderOrder,
+  onCaptionsChange,
+  onInterimCaptionChange,
+  onCaptionErrorChange,
+}: RoomTranscriptionControllerProps) {
+  const { isMicrophoneEnabled } = useLocalParticipant();
   const recognitionRef = useRef<SimpleSpeechRecognition | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const transcriptionQueueRef = useRef<Promise<void>>(Promise.resolve());
   const activeProviderRef = useRef<SttProvider | null>(null);
 
-  const speechRecognitionAvailable =
-    typeof window !== "undefined" &&
-    (() => {
-      const win = window as Window & {
-        SpeechRecognition?: SimpleSpeechRecognitionConstructor;
-        webkitSpeechRecognition?: SimpleSpeechRecognitionConstructor;
-      };
-      return Boolean(win.SpeechRecognition ?? win.webkitSpeechRecognition);
-    })();
-
-  const sttProviderOrder = DEFAULT_STT_PROVIDER_ORDER;
-  const sttLang = DEFAULT_STT_LANG;
-  const sttChunkMs = DEFAULT_STT_CHUNK_MS;
-  const sttDisabled = STT_DISABLED;
-
-  const audioCaptureOptions = startWithMic
-    ? {
-      autoGainControl: true,
-      echoCancellation: true,
-      noiseSuppression: true,
-    }
-    : false;
-
-  const handleMediaFailure = (failure?: unknown, kind?: string) => {
-    const kindLabel = kind === "videoinput" ? "camera" : kind === "audioinput" ? "microphone" : "media device";
-    setDeviceError(
-      `Unable to access your ${kindLabel}. ${(failure as { message?: string })?.message ?? "Check permissions and try again."}`,
-    );
-  };
-
-  useEffect(() => {
-    const controller = new AbortController();
-
-    async function loadToken() {
-      try {
-        const response = await fetch(
-          `/api/livekit/token?room=${encodeURIComponent(roomName)}&identity=${encodeURIComponent(identity)}`,
-          { signal: controller.signal },
-        );
-
-        if (!response.ok) {
-          const message = await response.text();
-          throw new Error(message || "Unable to get LiveKit token");
-        }
-
-        const data = (await response.json()) as TokenResponse;
-        setTokenData(data);
-      } catch (error) {
-        setError(error instanceof Error ? error.message : String(error));
-      }
-    }
-
-    loadToken();
-
-    return () => controller.abort();
-  }, [identity, roomName]);
-
   useEffect(() => {
     if (typeof window === "undefined") {
       return;
     }
 
-    if (sttDisabled) {
+    if (sttDisabled || !isMicrophoneEnabled) {
+      onInterimCaptionChange("");
       return;
     }
 
@@ -547,18 +542,18 @@ export function LiveMeetingRoom({
         }
 
         if (nextInterim) {
-          setInterimCaption(nextInterim);
+          onInterimCaptionChange(nextInterim);
         }
 
         if (finalized.length > 0) {
-          setCaptions((current) => [...current, ...finalized]);
-          setInterimCaption("");
+          onCaptionsChange((current) => [...current, ...finalized]);
+          onInterimCaptionChange("");
         }
       };
 
       recognition.onerror = (event: { error?: string; message?: string }) => {
         const message = event.error ?? String(event.message ?? "Speech recognition error");
-        setCaptionError(message);
+        onCaptionErrorChange(message);
         void switchProvider(`WebSpeech failed: ${message}`);
       };
 
@@ -569,15 +564,14 @@ export function LiveMeetingRoom({
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           console.warn("WebSpeech restart issue:", message);
-          // Try to restart one more time after a short delay before giving up
           setTimeout(() => {
             if (!recognitionRef.current) return;
             try {
               recognition.start();
             } catch (retryError) {
               const retryMessage = retryError instanceof Error ? retryError.message : String(retryError);
-              if (retryMessage.toLowerCase().includes("already")) return; // ignore already-started
-              setCaptionError(retryMessage);
+              if (retryMessage.toLowerCase().includes("already")) return;
+              onCaptionErrorChange(retryMessage);
               void switchProvider("WebSpeech could not restart.");
             }
           }, 1000);
@@ -640,26 +634,23 @@ export function LiveMeetingRoom({
             if (activeProviderRef.current !== provider) return;
             const text = await transcribeChunk(provider, event.data);
             if (!text) return;
-            setCaptions((current) => [...current, text]);
-            setInterimCaption("");
+            onCaptionsChange((current) => [...current, text]);
+            onInterimCaptionChange("");
             failures.set(provider, 0);
           })
           .catch((error) => {
             const next = (failures.get(provider) ?? 0) + 1;
             failures.set(provider, next);
             const message = error instanceof Error ? error.message : String(error);
-            setCaptionError(message);
+            onCaptionErrorChange(message);
             if (next >= 2) {
               void switchProvider(`${provider} failed: ${message}`);
             }
           });
       };
 
-      // Start recording the first chunk
       recorder.start();
 
-      // Chunking timer: periodically stop current recording (fires ondataavailable)
-      // and immediately restart a new complete recording session to ensure proper WebM headers.
       const intervalId = setInterval(() => {
         if (cancelled) {
           clearInterval(intervalId);
@@ -668,7 +659,6 @@ export function LiveMeetingRoom({
         try {
           if (recorder.state === "recording") {
             recorder.stop();
-            // Start recording the next chunk with fresh headers
             recorder.start();
           }
         } catch (e) {
@@ -683,8 +673,8 @@ export function LiveMeetingRoom({
     };
 
     const startProvider = async (provider: SttProvider): Promise<() => void> => {
-      setCaptionError(null);
-      setInterimCaption("");
+      onCaptionErrorChange(null);
+      onInterimCaptionChange("");
 
       if (provider === "webspeech") {
         stopMediaRecorder();
@@ -719,11 +709,11 @@ export function LiveMeetingRoom({
           return;
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          setCaptionError(context ? `${context} (${message})` : message);
+          onCaptionErrorChange(context ? `${context} (${message})` : message);
         }
       }
 
-      setCaptionError(
+      onCaptionErrorChange(
         "No STT provider is available. Enable microphone permissions or try a different browser (Chrome/Edge for WebSpeech).",
       );
     }
@@ -737,14 +727,13 @@ export function LiveMeetingRoom({
 
     void activateFromIndex(0);
 
-    // Recovery timer to periodically attempt to promote STT back to high-quality primary providers (index 0)
     const recoveryIntervalId = setInterval(() => {
       if (cancelled) return;
       if (currentIndex > 0) {
         console.log("Attempting STT recovery to primary provider...");
         void activateFromIndex(0, "Attempting STT primary provider recovery.");
       }
-    }, 60000); // Try to recover every 60 seconds
+    }, 60000);
 
     return () => {
       cancelled = true;
@@ -753,7 +742,88 @@ export function LiveMeetingRoom({
       stopWebSpeech();
       stopMediaRecorder();
     };
-  }, [speechRecognitionAvailable, sttChunkMs, sttDisabled, sttLang, sttProviderOrder]);
+  }, [speechRecognitionAvailable, sttChunkMs, sttDisabled, sttLang, sttProviderOrder, isMicrophoneEnabled]);
+
+  return null;
+}
+
+export function LiveMeetingRoom({
+  roomName,
+  identity,
+  title = "Draftmin Meeting",
+  startWithMic = true,
+  startWithCamera = false,
+}: LiveMeetingRoomProps) {
+  const [tokenData, setTokenData] = useState<TokenResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [deviceError, setDeviceError] = useState<string | null>(null);
+  const [activePanel, setActivePanel] = useState<MeetingPanel>(null);
+  const [captions, setCaptions] = useState<string[]>([]);
+  const [interimCaption, setInterimCaption] = useState<string>("");
+  const [captionError, setCaptionError] = useState<string | null>(null);
+
+  const speechRecognitionAvailable =
+    typeof window !== "undefined" &&
+    (() => {
+      const win = window as Window & {
+        SpeechRecognition?: SimpleSpeechRecognitionConstructor;
+        webkitSpeechRecognition?: SimpleSpeechRecognitionConstructor;
+      };
+      return Boolean(win.SpeechRecognition ?? win.webkitSpeechRecognition);
+    })();
+
+  const sttProviderOrder = DEFAULT_STT_PROVIDER_ORDER;
+  const sttLang = DEFAULT_STT_LANG;
+  const sttChunkMs = DEFAULT_STT_CHUNK_MS;
+  const sttDisabled = STT_DISABLED;
+
+  const audioCaptureOptions = startWithMic
+    ? {
+      autoGainControl: true,
+      echoCancellation: true,
+      noiseSuppression: true,
+    }
+    : false;
+
+  const handleMediaFailure = (failure?: unknown, kind?: string) => {
+    const kindLabel = kind === "videoinput" ? "camera" : kind === "audioinput" ? "microphone" : "media device";
+    setDeviceError(
+      `Unable to access your ${kindLabel}. ${(failure as { message?: string })?.message ?? "Check permissions and try again."}`,
+    );
+  };
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadToken() {
+      try {
+        setError(null);
+        const response = await fetch(
+          `/api/livekit/token?room=${encodeURIComponent(roomName)}&identity=${encodeURIComponent(identity)}`,
+          { signal: controller.signal },
+        );
+
+        if (!response.ok) {
+          const message = await response.text();
+          throw new Error(message || "Unable to get LiveKit token");
+        }
+
+        const data = (await response.json()) as TokenResponse;
+        setTokenData(data);
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") {
+          return;
+        }
+        setError(error instanceof Error ? error.message : String(error));
+      }
+    }
+
+    loadToken();
+
+    return () => controller.abort();
+  }, [identity, roomName]);
+
+
 
   if (!tokenData && !error) {
     return (
@@ -785,12 +855,6 @@ export function LiveMeetingRoom({
       video={
         startWithCamera
           ? {
-              resolution: {
-                width: 1280,
-                height: 720,
-                frameRate: 30,
-                aspectRatio: 1.777777778,
-              },
               facingMode: "user",
             }
           : false
@@ -798,6 +862,16 @@ export function LiveMeetingRoom({
       connect
       onMediaDeviceFailure={handleMediaFailure}
     >
+      <RoomTranscriptionController
+        sttDisabled={sttDisabled}
+        sttLang={sttLang}
+        sttChunkMs={sttChunkMs}
+        speechRecognitionAvailable={speechRecognitionAvailable}
+        sttProviderOrder={sttProviderOrder}
+        onCaptionsChange={setCaptions}
+        onInterimCaptionChange={setInterimCaption}
+        onCaptionErrorChange={setCaptionError}
+      />
       <MeetingLayout
         header={<MeetingHeader title={title} />}
         sidebar={
@@ -817,19 +891,46 @@ export function LiveMeetingRoom({
           <MeetingControls
             activePanel={activePanel}
             onTogglePanel={(panel) => setActivePanel((current) => (current === panel ? null : panel))}
-            onDeviceError={(error) => setDeviceError(error.message)}
+            onDeviceError={(error) => setDeviceError(error ? error.message : null)}
           />
         }
       >
         <div className="h-full w-full flex flex-col min-h-0">
-          {deviceError ? (
-            <div className="px-5 pt-5">
-              <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">
-                <div className="font-semibold">Media device issue</div>
-                <p className="mt-1 text-amber-100/80">{deviceError}</p>
+          {deviceError ? (() => {
+            const friendly = getFriendlyDeviceErrorMessage(deviceError);
+            return (
+              <div className="px-5 pt-5 animate-in fade-in slide-in-from-top-4 duration-300">
+                <div className="relative rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4 text-sm text-amber-200 backdrop-blur-md flex gap-3 items-start justify-between shadow-[0_4px_20px_rgba(245,158,11,0.05)]">
+                  <div className="flex gap-3">
+                    <span className="mt-0.5 text-amber-400 shrink-0">
+                      <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
+                        <path
+                          d="M12 9v4m0 4h.01M12 2a10 10 0 100 20 10 10 0 000-20z"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </span>
+                    <div className="space-y-1">
+                      <div className="font-semibold text-white">{friendly.title}</div>
+                      <p className="text-amber-200/80 text-xs leading-relaxed">{friendly.description}</p>
+                      <p className="text-amber-300/90 text-xs leading-relaxed font-medium mt-1">{friendly.suggestion}</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setDeviceError(null)}
+                    className="text-amber-400/60 hover:text-white transition p-1 hover:bg-white/5 rounded-lg shrink-0"
+                    aria-label="Dismiss error"
+                  >
+                    <IconClose />
+                  </button>
+                </div>
               </div>
-            </div>
-          ) : null}
+            );
+          })() : null}
           <div className="flex-1 min-h-0">
             <MeetingStage />
           </div>
