@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useState, FormEvent } from 'react';
+import { useState, FormEvent, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { AuthSidebar } from '@/shared/components/layout/AuthSidebar';
@@ -24,15 +24,20 @@ function Divider() {
         <div className="w-full border-t border-slate-200" />
       </div>
       <div className="relative flex justify-center">
-        <span className="bg-[#F6F8FC] px-3 text-xs text-slate-400 font-medium">or continue with email</span>
+        <span className="bg-[#F6F8FC] px-3 text-xs text-slate-400 font-medium">
+          or continue with email
+        </span>
       </div>
     </div>
   );
 }
 
-export default function LoginPage() {
+/* ---------------- LOGIN CONTENT (uses useSearchParams) ---------------- */
+
+function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+
   const redirect = searchParams.get('redirect') ?? '/meeting';
 
   const [email, setEmail] = useState('');
@@ -59,15 +64,30 @@ export default function LoginPage() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    if (!email.trim()) { setError('Please enter your email address.'); return; }
-    if (!password)     { setError('Please enter your password.'); return; }
+
+    if (!email.trim()) {
+      setError('Please enter your email address.');
+      return;
+    }
+    if (!password) {
+      setError('Please enter your password.');
+      return;
+    }
+
     setLoading(true);
+
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+
       if (error) throw error;
+
       router.replace(redirect);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Sign in failed.';
+
       if (msg.toLowerCase().includes('invalid login credentials')) {
         setError('Incorrect email or password. Please try again.');
       } else if (msg.toLowerCase().includes('email not confirmed')) {
@@ -83,8 +103,12 @@ export default function LoginPage() {
   return (
     <AuthSidebar>
       <div>
-        <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Welcome back</h1>
-        <p className="mt-2 text-sm text-slate-500">Sign in to your Draftmin account to continue.</p>
+        <h1 className="text-3xl font-bold text-slate-900 tracking-tight">
+          Welcome back
+        </h1>
+        <p className="mt-2 text-sm text-slate-500">
+          Sign in to your Draftmin account to continue.
+        </p>
 
         <button
           type="button"
@@ -92,66 +116,73 @@ export default function LoginPage() {
           disabled={googleLoading || loading}
           className="mt-8 w-full h-12 flex items-center justify-center gap-3 rounded-2xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
         >
-          {googleLoading
-            ? <span className="h-4 w-4 rounded-full border-2 border-slate-300 border-t-slate-700 animate-spin" />
-            : <GoogleLogo />}
+          {googleLoading ? (
+            <span className="h-4 w-4 rounded-full border-2 border-slate-300 border-t-slate-700 animate-spin" />
+          ) : (
+            <GoogleLogo />
+          )}
           Continue with Google
         </button>
 
         <Divider />
 
         {error && (
-          <div role="alert" className="mb-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 flex items-start gap-2">
-            <svg className="h-4 w-4 mt-0.5 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm-1-5h2v2H9v-2zm0-8h2v6H9V5z" clipRule="evenodd" />
-            </svg>
+          <div
+            role="alert"
+            className="mb-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 flex items-start gap-2"
+          >
             {error}
           </div>
         )}
 
         <form onSubmit={handleSubmit} noValidate className="space-y-4">
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1.5" htmlFor="login-email">
-              Email address
-            </label>
-            <input
-              id="login-email" type="email" autoComplete="email"
-              value={email} onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com" disabled={loading || googleLoading}
-              className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition disabled:opacity-50 placeholder:text-slate-400"
-            />
-          </div>
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs font-semibold text-slate-600" htmlFor="login-password">Password</label>
-              <a href="#" className="text-xs text-blue-600 hover:text-blue-700 transition font-medium">Forgot password?</a>
-            </div>
-            <input
-              id="login-password" type="password" autoComplete="current-password"
-              value={password} onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••" disabled={loading || googleLoading}
-              className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition disabled:opacity-50 placeholder:text-slate-400"
-            />
-          </div>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@example.com"
+            disabled={loading || googleLoading}
+            className="h-12 w-full rounded-2xl border border-slate-200 px-4 text-sm"
+          />
+
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="••••••••"
+            disabled={loading || googleLoading}
+            className="h-12 w-full rounded-2xl border border-slate-200 px-4 text-sm"
+          />
+
           <button
-            type="submit" disabled={loading || googleLoading}
-            className="mt-2 h-12 w-full rounded-2xl bg-blue-600 text-white font-semibold text-sm hover:bg-blue-700 active:bg-blue-800 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-sm shadow-blue-600/20"
+            type="submit"
+            disabled={loading || googleLoading}
+            className="h-12 w-full rounded-2xl bg-blue-600 text-white font-semibold"
           >
-            {loading && <span className="h-4 w-4 rounded-full border-2 border-blue-300 border-t-white animate-spin" />}
-            Sign in
+            {loading ? 'Signing in...' : 'Sign in'}
           </button>
         </form>
 
         <p className="mt-6 text-center text-sm text-slate-500">
           Don&apos;t have an account?{' '}
           <Link
-            href={`/auth/signup${redirect !== '/meeting' ? `?redirect=${encodeURIComponent(redirect)}` : ''}`}
-            className="font-semibold text-blue-600 hover:text-blue-700 transition"
+            href="/auth/signup"
+            className="font-semibold text-blue-600"
           >
             Sign up free
           </Link>
         </p>
       </div>
     </AuthSidebar>
+  );
+}
+
+/* ---------------- PAGE WRAPPER (Suspense fix) ---------------- */
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="p-6">Loading...</div>}>
+      <LoginContent />
+    </Suspense>
   );
 }
