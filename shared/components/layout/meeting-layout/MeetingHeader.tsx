@@ -8,97 +8,108 @@ import {
   useRoomContext,
 } from "@livekit/components-react";
 
-type MeetingHeaderProps = {
-  title?: string;
-};
-
-function formatDuration(totalSeconds: number) {
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-
-  if (hours > 0) {
-    return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-  }
-
-  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+function formatDuration(s: number) {
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  return h > 0
+    ? `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`
+    : `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
 }
 
-export function MeetingHeader({ title = "Draftmin Meeting" }: MeetingHeaderProps) {
+export function MeetingHeader({ title = "Meeting" }: { title?: string }) {
   const room = useRoomContext();
   const connectionState = useConnectionState(room);
   const { quality } = useConnectionQualityIndicator({ participant: room.localParticipant });
   const participants = useParticipants({ room });
-
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    const id = setInterval(() => {
-      setElapsedSeconds((value) => value + 1);
-    }, 1000);
-
+    const id = setInterval(() => setElapsed((v) => v + 1), 1000);
     return () => clearInterval(id);
   }, []);
 
-  const handleCopyLink = () => {
-    if (typeof window !== "undefined") {
-      navigator.clipboard.writeText(window.location.href);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
+  const copyInvite = () => {
+    const url = `${window.location.origin}/meeting/${encodeURIComponent(room.name)}/prejoin`;
+    navigator.clipboard.writeText(url);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2500);
   };
 
-  const connectionLabel = String(connectionState);
-  const isConnected = connectionLabel.toLowerCase().includes("connected");
+  const isConnected = String(connectionState).toLowerCase().includes("connected");
+
+  const qualityColor =
+    String(quality).toLowerCase() === "excellent"
+      ? "text-emerald-400"
+      : String(quality).toLowerCase() === "good"
+      ? "text-emerald-400"
+      : String(quality).toLowerCase() === "poor"
+      ? "text-amber-400"
+      : "text-white/40";
 
   return (
     <div className="flex w-full items-center justify-between gap-4">
-      <div className="min-w-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <div className="truncate text-sm font-semibold text-white">{title}</div>
-          <div className="hidden sm:flex items-center gap-2 text-xs text-white/60 min-w-0">
-            <span className="h-1 w-1 rounded-full bg-white/40" />
-            <span className="truncate">{room.name}</span>
-          </div>
+      {/* Left */}
+      <div className="flex items-center gap-3 min-w-0">
+        <div className="h-8 w-8 rounded-xl bg-gradient-to-br from-blue-500 to-violet-600 grid place-items-center font-bold text-xs shrink-0">
+          D
         </div>
-        <div className="mt-0.5 flex items-center gap-3 text-xs text-white/60">
-          <span className="inline-flex items-center gap-2">
-            <span className={`h-2 w-2 rounded-full ${isConnected ? "bg-emerald-400" : "bg-amber-400"}`} />
-            <span className="capitalize">{connectionLabel}</span>
-          </span>
-          <span className="hidden sm:inline">•</span>
-          <span className="hidden sm:inline">Quality: {String(quality).toLowerCase()}</span>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold text-white truncate">{title}</span>
+            <span className="hidden sm:inline text-white/20">·</span>
+            <span className="hidden sm:inline text-xs text-white/40 font-mono truncate">{room.name}</span>
+          </div>
+          <div className="flex items-center gap-2 mt-0.5">
+            <span className={`h-1.5 w-1.5 rounded-full ${isConnected ? "bg-emerald-400" : "bg-amber-400 animate-pulse"}`} />
+            <span className="text-[10px] text-white/40 capitalize">{String(connectionState)}</span>
+            <span className="hidden sm:inline text-white/10">·</span>
+            <span className={`hidden sm:inline text-[10px] capitalize ${qualityColor}`}>{String(quality).toLowerCase()}</span>
+          </div>
         </div>
       </div>
 
-      <div className="flex items-center gap-2 text-xs text-white/70">
+      {/* Right */}
+      <div className="flex items-center gap-2 shrink-0">
+        {/* Duration */}
+        <div className="hidden sm:flex items-center gap-1.5 rounded-full bg-white/5 border border-white/[0.08] px-3 py-1.5 text-xs text-white/50 font-mono tabular-nums">
+          {formatDuration(elapsed)}
+        </div>
+
+        {/* Participants count */}
+        <div className="hidden sm:flex items-center gap-1.5 rounded-full bg-white/5 border border-white/[0.08] px-3 py-1.5 text-xs text-white/50">
+          <svg viewBox="0 0 24 24" fill="none" className="h-3.5 w-3.5" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            <path strokeLinecap="round" d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" />
+            <circle cx="9" cy="7" r="4" />
+          </svg>
+          {participants.length}
+        </div>
+
+        {/* Invite */}
         <button
-          onClick={handleCopyLink}
-          className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 hover:bg-white/10 active:scale-95 transition"
+          onClick={copyInvite}
+          className={[
+            "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition",
+            copied
+              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+              : "border-white/[0.08] bg-white/5 text-white/60 hover:bg-white/10 hover:text-white",
+          ].join(" ")}
         >
           {copied ? (
             <>
-              <svg viewBox="0 0 24 24" fill="none" className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true">
-                <path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              <span className="text-emerald-400 font-medium">Copied!</span>
+              <svg viewBox="0 0 24 24" fill="none" className="h-3 w-3" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+              Copied!
             </>
           ) : (
             <>
-              <svg viewBox="0 0 24 24" fill="none" className="h-3.5 w-3.5" aria-hidden="true">
-                <path d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 002-2h2a2 2 0 002 2m0 0h2a2 2 0 012 2v3m-6 4H8m4 4H8m8-8h-2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              <svg viewBox="0 0 24 24" fill="none" className="h-3 w-3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
               </svg>
-              <span>Copy Link</span>
+              Invite
             </>
           )}
         </button>
-        <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5">
-          {formatDuration(elapsedSeconds)}
-        </div>
-        <div className="hidden sm:block rounded-full border border-white/10 bg-white/5 px-3 py-1.5">
-          {participants.length} participants
-        </div>
       </div>
     </div>
   );

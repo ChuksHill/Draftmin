@@ -5,31 +5,44 @@ export function MeetingLayout({
   sidebar,
   children,
   controls,
+  controlsVisible = true,
 }: {
   header?: ReactNode;
   sidebar?: ReactNode;
   children: ReactNode;
   controls?: ReactNode;
+  controlsVisible?: boolean;
 }) {
-  const hasSidebar = Boolean(sidebar);
   return (
-    <div className="h-screen w-full bg-[#0B0F19] text-white flex flex-col">
-      <div className="h-14 border-b border-white/10 flex items-center px-4 md:px-6 bg-[#0B0F19]/95 backdrop-blur supports-[backdrop-filter]:bg-[#0B0F19]/80">
-        {header}
+    <div className="h-screen w-full bg-[#09090e] text-white flex flex-col overflow-hidden">
+      {/* Header */}
+      <div className="absolute top-0 left-0 right-0 z-20 h-16 flex items-center px-5 bg-gradient-to-b from-black/70 to-transparent pointer-events-none">
+        <div className="pointer-events-auto w-full">{header}</div>
       </div>
 
+      {/* Body */}
       <div className="flex flex-1 min-h-0 overflow-hidden">
-        <div className="flex-1 min-w-0 relative">{children}</div>
+        {/* Video stage — full bleed */}
+        <div className="flex-1 min-w-0 relative">
+          {children}
 
-        {hasSidebar ? (
-          <div className="w-[360px] border-l border-white/10 bg-[#0B0F19]">
+          {/* Floating controls — overlaid at bottom */}
+          <div
+            className={[
+              "absolute bottom-6 left-1/2 -translate-x-1/2 z-20 transition-all duration-500",
+              controlsVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-3 pointer-events-none",
+            ].join(" ")}
+          >
+            {controls}
+          </div>
+        </div>
+
+        {/* Side panel */}
+        {sidebar ? (
+          <div className="w-[340px] shrink-0 border-l border-white/[0.06] bg-[#0d0f14] flex flex-col z-10">
             {sidebar}
           </div>
         ) : null}
-      </div>
-
-      <div className="h-[92px] border-t border-white/10 flex items-center justify-center bg-[#0B0F19]/95 px-3 md:px-6 backdrop-blur supports-[backdrop-filter]:bg-[#0B0F19]/80">
-        {controls}
       </div>
     </div>
   );

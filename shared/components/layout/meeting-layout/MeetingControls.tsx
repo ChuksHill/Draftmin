@@ -1,312 +1,293 @@
 "use client";
 
-import { ReactNode, useCallback, useMemo, useState } from "react";
+import { ReactNode, useCallback, useState } from "react";
 import { StartAudio, useLocalParticipant, useRoomContext } from "@livekit/components-react";
 
 export type MeetingPanel = "participants" | "chat" | "captions" | null;
 
-type MeetingControlsProps = {
+type Props = {
   activePanel?: MeetingPanel;
   onTogglePanel?: (panel: Exclude<MeetingPanel, null>) => void;
   onDeviceError?: (error: Error | null) => void;
+  isFullscreen?: boolean;
+  onToggleFullscreen?: () => void;
+  viewMode?: "grid" | "speaker";
+  onToggleView?: () => void;
 };
 
-function ControlIcon({ children }: { children: ReactNode }) {
-  return <span className="h-5 w-5">{children}</span>;
-}
-
-function IconMic({ muted }: { muted: boolean }) {
+/* ── Icon components ──────────────────────────────────────────────────────── */
+function IconMic({ off }: { off: boolean }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
-      <path
-        d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-      <path
-        d="M19 11a7 7 0 0 1-14 0"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-      <path d="M12 18v3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-      <path d="M8 21h8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-      {muted ? (
-        <path d="M5 5l14 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      ) : null}
+    <svg viewBox="0 0 24 24" fill="none" className="h-[18px] w-[18px]" aria-hidden="true">
+      {off ? (
+        <path d="M12 2a3 3 0 00-3 3v7a3 3 0 006 0V5a3 3 0 00-3-3zM19 10v1a7 7 0 01-14 0v-1M12 19v3m-3 0h6M3 3l18 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      ) : (
+        <>
+          <path d="M12 2a3 3 0 00-3 3v7a3 3 0 006 0V5a3 3 0 00-3-3z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          <path d="M19 10v1a7 7 0 01-14 0v-1M12 19v3m-3 0h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </>
+      )}
     </svg>
   );
 }
 
-function IconCamera({ muted }: { muted: boolean }) {
+function IconCamera({ off }: { off: boolean }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
-      <path
-        d="M4.5 7.5A2.5 2.5 0 0 1 7 5h7a2.5 2.5 0 0 1 2.5 2.5v9A2.5 2.5 0 0 1 14 19H7a2.5 2.5 0 0 1-2.5-2.5v-9Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-      />
-      <path
-        d="M16.5 10.2 21 7.5v9l-4.5-2.7v-3.6Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      {muted ? (
-        <path d="M5 5l14 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      ) : null}
+    <svg viewBox="0 0 24 24" fill="none" className="h-[18px] w-[18px]" aria-hidden="true">
+      {off ? (
+        <path d="M15 10l4.553-2.277A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M3 3l18 18M7.5 8H5a2 2 0 00-2 2v6a2 2 0 002 2h10a2 2 0 001.5-.67" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      ) : (
+        <>
+          <path d="M15 10l4.553-2.277A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          <rect x="3" y="8" width="12" height="10" rx="2" stroke="currentColor" strokeWidth="2" />
+        </>
+      )}
     </svg>
   );
 }
 
 function IconShare({ active }: { active: boolean }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
-      <path d="M12 16V4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-      <path
-        d="M7.5 8.5 12 4l4.5 4.5"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M5 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-      {active ? (
-        <path d="M12 18h0" stroke="currentColor" strokeWidth="6" strokeLinecap="round" />
-      ) : null}
+    <svg viewBox="0 0 24 24" fill="none" className="h-[18px] w-[18px]" aria-hidden="true">
+      <rect x="2" y="3" width="20" height="14" rx="2" stroke="currentColor" strokeWidth="2" />
+      <path d="M8 21h8M12 17v4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      {active && <path d="M7 10l5-5 5 5M12 5v8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />}
     </svg>
   );
 }
 
 function IconUsers() {
   return (
-    <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
-      <path d="M16 18.5c0-2 2-3.5 4-3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-      <path
-        d="M4 18.5c0-2 2.7-3.5 6-3.5s6 1.5 6 3.5"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-      <path d="M10 12.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M18 12a2.5 2.5 0 1 0 0-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    <svg viewBox="0 0 24 24" fill="none" className="h-[18px] w-[18px]" aria-hidden="true">
+      <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <circle cx="9" cy="7" r="4" stroke="currentColor" strokeWidth="2" />
+      <path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
     </svg>
   );
 }
 
 function IconChat() {
   return (
-    <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
-      <path
-        d="M7 17.5H6a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v7.5a3 3 0 0 1-3 3h-6.5L7 21v-3.5Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-      <path d="M7.5 9.5h9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-      <path d="M7.5 12.5h6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    <svg viewBox="0 0 24 24" fill="none" className="h-[18px] w-[18px]" aria-hidden="true">
+      <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
 
 function IconCaptions() {
   return (
-    <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
-      <path
-        d="M4.5 6.5A2.5 2.5 0 0 1 7 4h10a2.5 2.5 0 0 1 2.5 2.5v9A2.5 2.5 0 0 1 17 18H7a2.5 2.5 0 0 1-2.5-2.5v-9Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-      />
-      <path d="M8 11h3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-      <path d="M13 11h3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-      <path d="M8 14h8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    <svg viewBox="0 0 24 24" fill="none" className="h-[18px] w-[18px]" aria-hidden="true">
+      <rect x="2" y="5" width="20" height="14" rx="2" stroke="currentColor" strokeWidth="2" />
+      <path d="M7 12h4M13 12h4M7 15.5h3M12 15.5h5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
     </svg>
   );
 }
 
-function ControlButton({
-  label,
-  active,
-  onClick,
-  icon,
-  disabled,
-}: {
-  label: string;
-  active?: boolean;
-  onClick?: () => void;
-  icon: ReactNode;
-  disabled?: boolean;
-}) {
+function IconGrid() {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={[
-        "group flex w-[74px] flex-col items-center justify-center gap-1 rounded-xl px-2 py-2 text-xs",
-        "border border-white/10 bg-white/5 hover:bg-white/10 transition disabled:opacity-40 disabled:cursor-not-allowed",
-        active ? "ring-1 ring-emerald-400/50 border-emerald-400/30" : "",
-      ].join(" ")}
-    >
-      <span className="text-white/90">{icon}</span>
-      <span className="text-white/70 group-hover:text-white/90">{label}</span>
-    </button>
+    <svg viewBox="0 0 24 24" fill="none" className="h-[18px] w-[18px]" aria-hidden="true">
+      <rect x="3" y="3" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" />
+      <rect x="14" y="3" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" />
+      <rect x="3" y="14" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" />
+      <rect x="14" y="14" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="2" />
+    </svg>
   );
 }
 
-export function MeetingControls({ activePanel, onTogglePanel, onDeviceError }: MeetingControlsProps) {
+function IconSpeaker() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className="h-[18px] w-[18px]" aria-hidden="true">
+      <rect x="2" y="3" width="15" height="14" rx="1.5" stroke="currentColor" strokeWidth="2" />
+      <rect x="19" y="4" width="3" height="5" rx="1" stroke="currentColor" strokeWidth="1.5" />
+      <rect x="19" y="12" width="3" height="5" rx="1" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M2 21h20" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function IconFullscreen({ active }: { active: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className="h-[18px] w-[18px]" aria-hidden="true">
+      {active ? (
+        <>
+          <path d="M8 3v3a2 2 0 01-2 2H3M21 8h-3a2 2 0 01-2-2V3M3 16h3a2 2 0 012 2v3M16 21v-3a2 2 0 012-2h3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </>
+      ) : (
+        <>
+          <path d="M8 3H5a2 2 0 00-2 2v3M21 8V5a2 2 0 00-2-2h-3M3 16v3a2 2 0 002 2h3M16 21h3a2 2 0 002-2v-3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </>
+      )}
+    </svg>
+  );
+}
+
+function IconEndCall() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
+      <path d="M10.68 13.31a16 16 0 003.41 2.6l1.27-1.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7 2 2 0 011.72 2v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.42 19.42 0 012 6.18 2 2 0 014 4h3a2 2 0 012 1.72 12.84 12.84 0 00.7 2.81 2 2 0 01-.45 2.11L8.09 9.91M23 1L1 23" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/* ── Button sub-components ────────────────────────────────────────────────── */
+function MediaBtn({
+  label, danger, onClick, icon, disabled,
+}: {
+  label: string; danger?: boolean; onClick?: () => void; icon: ReactNode; disabled?: boolean;
+}) {
+  return (
+    <div className="flex flex-col items-center gap-1.5">
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={disabled}
+        className={[
+          "h-12 w-12 rounded-full flex items-center justify-center transition-all active:scale-95 disabled:opacity-40",
+          danger
+            ? "bg-red-500/20 border border-red-500/30 text-red-400 hover:bg-red-500/30"
+            : "bg-white/10 border border-white/[0.08] text-white hover:bg-white/20",
+        ].join(" ")}
+      >
+        {icon}
+      </button>
+      <span className="text-[10px] text-white/30 select-none">{label}</span>
+    </div>
+  );
+}
+
+function PanelBtn({
+  label, active, onClick, icon,
+}: {
+  label: string; active?: boolean; onClick?: () => void; icon: ReactNode;
+}) {
+  return (
+    <div className="flex flex-col items-center gap-1.5">
+      <button
+        type="button"
+        onClick={onClick}
+        className={[
+          "h-10 w-10 rounded-2xl flex items-center justify-center transition-all active:scale-95",
+          active
+            ? "bg-blue-500/20 border border-blue-500/30 text-blue-400"
+            : "bg-white/5 border border-white/[0.06] text-white/50 hover:bg-white/10 hover:text-white",
+        ].join(" ")}
+      >
+        {icon}
+      </button>
+      <span className={["text-[10px] select-none", active ? "text-blue-400/80" : "text-white/25"].join(" ")}>{label}</span>
+    </div>
+  );
+}
+
+/* ── Main export ──────────────────────────────────────────────────────────── */
+export function MeetingControls({
+  activePanel,
+  onTogglePanel,
+  onDeviceError,
+  isFullscreen = false,
+  onToggleFullscreen,
+  viewMode = "grid",
+  onToggleView,
+}: Props) {
   const room = useRoomContext();
   const { localParticipant, isMicrophoneEnabled, isCameraEnabled, isScreenShareEnabled } = useLocalParticipant();
-
   const [togglingMic, setTogglingMic] = useState(false);
-  const [togglingCamera, setTogglingCamera] = useState(false);
+  const [togglingCam, setTogglingCam] = useState(false);
   const [togglingScreen, setTogglingScreen] = useState(false);
 
-  const reportDeviceError = useCallback(
-    (error: unknown) => {
-      const normalized = error instanceof Error ? error : new Error(String(error));
-      onDeviceError?.(normalized);
-    },
+  const report = useCallback(
+    (e: unknown) => onDeviceError?.(e instanceof Error ? e : new Error(String(e))),
     [onDeviceError],
   );
 
   const toggleMic = useCallback(async () => {
     if (togglingMic) return;
     setTogglingMic(true);
-    try {
-      await localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled);
-      onDeviceError?.(null);
-    } catch (error) {
-      reportDeviceError(error);
-    } finally {
-      setTogglingMic(false);
-    }
-  }, [isMicrophoneEnabled, togglingMic, reportDeviceError, localParticipant, onDeviceError]);
+    try { await localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled); onDeviceError?.(null); }
+    catch (e) { report(e); } finally { setTogglingMic(false); }
+  }, [isMicrophoneEnabled, togglingMic, report, localParticipant, onDeviceError]);
 
-  const toggleCamera = useCallback(async () => {
-    if (togglingCamera) return;
-    setTogglingCamera(true);
-    try {
-      await localParticipant.setCameraEnabled(!isCameraEnabled);
-      onDeviceError?.(null);
-    } catch (error) {
-      reportDeviceError(error);
-    } finally {
-      setTogglingCamera(false);
-    }
-  }, [isCameraEnabled, togglingCamera, reportDeviceError, localParticipant, onDeviceError]);
+  const toggleCam = useCallback(async () => {
+    if (togglingCam) return;
+    setTogglingCam(true);
+    try { await localParticipant.setCameraEnabled(!isCameraEnabled); onDeviceError?.(null); }
+    catch (e) { report(e); } finally { setTogglingCam(false); }
+  }, [isCameraEnabled, togglingCam, report, localParticipant, onDeviceError]);
 
-  const toggleScreenShare = useCallback(async () => {
+  const toggleScreen = useCallback(async () => {
     if (togglingScreen) return;
     setTogglingScreen(true);
-    try {
-      await localParticipant.setScreenShareEnabled(!isScreenShareEnabled);
-      onDeviceError?.(null);
-    } catch (error) {
-      reportDeviceError(error);
-    } finally {
-      setTogglingScreen(false);
-    }
-  }, [isScreenShareEnabled, togglingScreen, reportDeviceError, localParticipant, onDeviceError]);
-
-  const togglePanel = useMemo(() => {
-    return (panel: Exclude<MeetingPanel, null>) => onTogglePanel?.(panel);
-  }, [onTogglePanel]);
+    try { await localParticipant.setScreenShareEnabled(!isScreenShareEnabled); onDeviceError?.(null); }
+    catch (e) { report(e); } finally { setTogglingScreen(false); }
+  }, [isScreenShareEnabled, togglingScreen, report, localParticipant, onDeviceError]);
 
   return (
-    <div className="w-full flex items-center justify-between gap-3">
-      <div className="hidden md:flex items-center gap-2">
-        <StartAudio
-          className="h-9 rounded-xl border border-white/10 bg-white/5 px-3 text-xs text-white/80 hover:bg-white/10 transition"
-          label="Enable audio playback"
-        />
-      </div>
+    <div className="flex items-end gap-3 bg-[#14151c]/80 backdrop-blur-2xl border border-white/[0.08] rounded-2xl px-5 py-4 shadow-[0_8px_40px_rgba(0,0,0,0.6)]">
+      {/* Audio unlock (hidden until needed) */}
+      <StartAudio
+        className="hidden h-8 rounded-xl border border-white/10 bg-white/5 px-3 text-xs text-white/40 hover:text-white transition"
+        label="Unlock audio"
+      />
 
-      <div className="flex flex-1 items-center justify-center gap-2">
-        <ControlButton
-          label={togglingMic ? "Syncing..." : isMicrophoneEnabled ? "Mute" : "Unmute"}
-          onClick={toggleMic}
-          disabled={togglingMic}
-          icon={
-            <ControlIcon>
-              <IconMic muted={!isMicrophoneEnabled} />
-            </ControlIcon>
-          }
-          active={!isMicrophoneEnabled}
-        />
-        <ControlButton
-          label={togglingCamera ? "Syncing..." : isCameraEnabled ? "Stop Video" : "Start Video"}
-          onClick={toggleCamera}
-          disabled={togglingCamera}
-          icon={
-            <ControlIcon>
-              <IconCamera muted={!isCameraEnabled} />
-            </ControlIcon>
-          }
-          active={!isCameraEnabled}
-        />
-        <ControlButton
-          label={togglingScreen ? "Sharing..." : isScreenShareEnabled ? "Stop Share" : "Share"}
-          onClick={toggleScreenShare}
-          disabled={togglingScreen}
-          icon={
-            <ControlIcon>
-              <IconShare active={isScreenShareEnabled} />
-            </ControlIcon>
-          }
-          active={isScreenShareEnabled}
-        />
+      {/* Primary controls */}
+      <MediaBtn
+        label={togglingMic ? "…" : isMicrophoneEnabled ? "Mute" : "Unmute"}
+        danger={!isMicrophoneEnabled}
+        onClick={toggleMic}
+        disabled={togglingMic}
+        icon={<IconMic off={!isMicrophoneEnabled} />}
+      />
+      <MediaBtn
+        label={togglingCam ? "…" : isCameraEnabled ? "Stop video" : "Start video"}
+        danger={!isCameraEnabled}
+        onClick={toggleCam}
+        disabled={togglingCam}
+        icon={<IconCamera off={!isCameraEnabled} />}
+      />
+      <MediaBtn
+        label={isScreenShareEnabled ? "Stop share" : "Share screen"}
+        onClick={toggleScreen}
+        disabled={togglingScreen}
+        icon={<IconShare active={isScreenShareEnabled} />}
+      />
 
-        <div className="hidden md:block h-9 w-px bg-white/10 mx-1" />
+      {/* Divider */}
+      <div className="w-px h-10 bg-white/[0.06] mx-1 self-center" />
 
-        <ControlButton
-          label="Participants"
-          onClick={() => togglePanel("participants")}
-          icon={
-            <ControlIcon>
-              <IconUsers />
-            </ControlIcon>
-          }
-          active={activePanel === "participants"}
-        />
-        <ControlButton
-          label="Chat"
-          onClick={() => togglePanel("chat")}
-          icon={
-            <ControlIcon>
-              <IconChat />
-            </ControlIcon>
-          }
-          active={activePanel === "chat"}
-        />
-        <ControlButton
-          label="Captions"
-          onClick={() => togglePanel("captions")}
-          icon={
-            <ControlIcon>
-              <IconCaptions />
-            </ControlIcon>
-          }
-          active={activePanel === "captions"}
-        />
-      </div>
+      {/* Panel toggles */}
+      <PanelBtn label="People" active={activePanel === "participants"} onClick={() => onTogglePanel?.("participants")} icon={<IconUsers />} />
+      <PanelBtn label="Chat" active={activePanel === "chat"} onClick={() => onTogglePanel?.("chat")} icon={<IconChat />} />
+      <PanelBtn label="Captions" active={activePanel === "captions"} onClick={() => onTogglePanel?.("captions")} icon={<IconCaptions />} />
 
-      <div className="flex items-center justify-end">
+      {/* Divider */}
+      <div className="w-px h-10 bg-white/[0.06] mx-1 self-center" />
+
+      {/* View mode + fullscreen */}
+      <PanelBtn
+        label={viewMode === "grid" ? "Speaker" : "Grid"}
+        onClick={onToggleView}
+        icon={viewMode === "grid" ? <IconSpeaker /> : <IconGrid />}
+      />
+      <PanelBtn
+        label={isFullscreen ? "Exit full" : "Fullscreen"}
+        onClick={onToggleFullscreen}
+        icon={<IconFullscreen active={isFullscreen} />}
+      />
+
+      {/* Divider */}
+      <div className="w-px h-10 bg-white/[0.06] mx-1 self-center" />
+
+      {/* End call */}
+      <div className="flex flex-col items-center gap-1.5">
         <button
           type="button"
-          onClick={() => {
-            room.disconnect(true);
-          }}
-          className="h-10 rounded-xl bg-red-600 px-4 text-sm font-semibold text-white hover:bg-red-700 transition"
+          onClick={() => room.disconnect(true)}
+          className="h-12 w-14 rounded-full bg-red-600 hover:bg-red-500 active:scale-95 transition flex items-center justify-center text-white shadow-[0_0_20px_rgba(239,68,68,0.3)]"
+          aria-label="Leave meeting"
         >
-          End
+          <IconEndCall />
         </button>
+        <span className="text-[10px] text-white/30 select-none">Leave</span>
       </div>
     </div>
   );

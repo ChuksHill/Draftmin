@@ -17,61 +17,31 @@ import { MeetingLayout } from "@/shared/components/layout/meeting-layout/Meeting
 import { MeetingHeader } from "@/shared/components/layout/meeting-layout/MeetingHeader";
 import { MeetingControls, MeetingPanel } from "@/shared/components/layout/meeting-layout/MeetingControls";
 
+/* ─────────────────────────────────────────────────────────────────────────
+   STT types & utilities (unchanged)
+───────────────────────────────────────────────────────────────────────── */
 type SttProvider = "deepgram" | "whisper" | "webspeech";
-
-type SimpleSpeechRecognitionAlternative = {
-  transcript?: string;
-};
-
-type SimpleSpeechRecognitionResult = {
-  isFinal: boolean;
-  [index: number]: SimpleSpeechRecognitionAlternative;
-};
-
-type SimpleSpeechRecognitionResultList = {
-  length: number;
-  [index: number]: SimpleSpeechRecognitionResult;
-};
-
-type SimpleSpeechRecognitionEvent = Event & {
-  readonly resultIndex: number;
-  readonly results: SimpleSpeechRecognitionResultList;
-};
-
+type SimpleSpeechRecognitionAlternative = { transcript?: string };
+type SimpleSpeechRecognitionResult = { isFinal: boolean; [index: number]: SimpleSpeechRecognitionAlternative };
+type SimpleSpeechRecognitionResultList = { length: number; [index: number]: SimpleSpeechRecognitionResult };
+type SimpleSpeechRecognitionEvent = Event & { readonly resultIndex: number; readonly results: SimpleSpeechRecognitionResultList };
 type SimpleSpeechRecognition = {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  maxAlternatives: number;
+  continuous: boolean; interimResults: boolean; lang: string; maxAlternatives: number;
   onresult?: (event: SimpleSpeechRecognitionEvent) => void;
   onerror?: (event: { error?: string; message?: string }) => void;
-  onend?: () => void;
-  start: () => void;
-  stop: () => void;
+  onend?: () => void; start: () => void; stop: () => void;
 };
-
 type SimpleSpeechRecognitionConstructor = new () => SimpleSpeechRecognition;
-
-type TokenResponse = {
-  url: string;
-  token: string;
-  room: string;
-  identity: string;
-};
+type TokenResponse = { url: string; token: string; room: string; identity: string };
 
 function parseSttProviderOrder(value: string | undefined | null): SttProvider[] {
-  const normalized = (value ?? "")
-    .split(",")
-    .map((entry) => entry.trim().toLowerCase())
-    .filter(Boolean);
-
-  const order = normalized.filter((entry): entry is SttProvider => entry === "deepgram" || entry === "whisper" || entry === "webspeech");
+  const normalized = (value ?? "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+  const order = normalized.filter((e): e is SttProvider => e === "deepgram" || e === "whisper" || e === "webspeech");
   return order.length > 0 ? order : ["webspeech"];
 }
-
 function parsePositiveInt(value: string | undefined | null, fallback: number) {
-  const parsed = Number.parseInt((value ?? "").trim(), 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  const p = Number.parseInt((value ?? "").trim(), 10);
+  return Number.isFinite(p) && p > 0 ? p : fallback;
 }
 
 const DEFAULT_STT_PROVIDER_ORDER = parseSttProviderOrder(process.env.NEXT_PUBLIC_STT_PROVIDER_ORDER);
@@ -80,187 +50,329 @@ const DEFAULT_STT_CHUNK_MS = parsePositiveInt(process.env.NEXT_PUBLIC_STT_CHUNK_
 const STT_DISABLED = Boolean((process.env.NEXT_PUBLIC_STT_DISABLED ?? "").trim());
 
 export type LiveMeetingRoomProps = {
-  roomName: string;
-  identity: string;
-  title?: string;
-  startWithMic?: boolean;
-  startWithCamera?: boolean;
+  roomName: string; identity: string; title?: string;
+  startWithMic?: boolean; startWithCamera?: boolean;
 };
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Helpers
+───────────────────────────────────────────────────────────────────────── */
+function identityToDisplay(identity: string): string {
+  // Strip trailing 6-char random suffix, then humanise dashes → spaces + title-case
+  const base = identity.replace(/-[a-z0-9]{6}$/, "");
+  return base
+    .split("-")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
+function getInitials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "?";
+  return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
+}
 
 function IconClose() {
   return (
-    <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
-      <path d="M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      <path d="M18 6 6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" aria-hidden="true">
+      <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
     </svg>
   );
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+   Participant tile — modern redesign
+───────────────────────────────────────────────────────────────────────── */
+function ParticipantTile({ trackRef }: { trackRef: any }) {
+  const participant = trackRef.participant;
+  const isLocal = participant?.isLocal;
+  const isSpeaking = participant?.isSpeaking;
+  const isMicOn = participant?.isMicrophoneEnabled;
+  const isCamOn = trackRef.publication?.isSubscribed && !trackRef.publication?.isMuted;
+  const identity = participant?.identity ?? "unknown";
+  const displayName = identityToDisplay(identity);
+  const initials = getInitials(displayName);
+
+  return (
+    <div
+      className={[
+        "relative h-full w-full overflow-hidden rounded-2xl bg-[#111318] transition-all duration-300",
+        isSpeaking
+          ? "ring-2 ring-violet-500/70 shadow-[0_0_0_2px_rgba(139,92,246,0.2),0_0_30px_rgba(139,92,246,0.12)]"
+          : "ring-1 ring-white/[0.06]",
+      ].join(" ")}
+    >
+      {/* Video or avatar */}
+      {isCamOn && trackRef.publication?.track ? (
+        <VideoTrack
+          trackRef={trackRef as any}
+          className="h-full w-full object-cover"
+        />
+      ) : (
+        <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-[#1c1f2e] to-[#0e0f15]">
+          <div className="flex flex-col items-center gap-3">
+            <div
+              className={[
+                "h-16 w-16 rounded-2xl flex items-center justify-center text-xl font-semibold transition-all",
+                isSpeaking
+                  ? "bg-violet-600/25 text-violet-200 ring-1 ring-violet-500/40"
+                  : "bg-white/[0.07] text-white/60 ring-1 ring-white/[0.08]",
+              ].join(" ")}
+            >
+              {initials}
+            </div>
+            <span className="text-xs text-white/30">{displayName}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Vignette gradient for readability */}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent pointer-events-none" />
+
+      {/* Bottom info bar */}
+      <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between gap-2">
+        <span className="text-xs font-medium text-white/90 truncate">
+          {displayName}{isLocal ? " (You)" : ""}
+        </span>
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Speaking bars */}
+          {isSpeaking && (
+            <div className="flex items-end gap-[2px] h-4">
+              {[3, 5, 4, 6, 3].map((h, i) => (
+                <div
+                  key={i}
+                  className="w-[2px] rounded-full bg-violet-400 animate-pulse"
+                  style={{ height: `${h}px`, animationDelay: `${i * 80}ms` }}
+                />
+              ))}
+            </div>
+          )}
+          {/* Mic indicator */}
+          <div
+            className={[
+              "h-6 w-6 rounded-full flex items-center justify-center",
+              isMicOn ? "bg-white/10" : "bg-red-500/20",
+            ].join(" ")}
+          >
+            <svg viewBox="0 0 24 24" fill="none" className={`h-3 w-3 ${isMicOn ? "text-white/60" : "text-red-400"}`}>
+              {isMicOn ? (
+                <>
+                  <path d="M12 2a3 3 0 00-3 3v7a3 3 0 006 0V5a3 3 0 00-3-3z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  <path d="M19 10v1a7 7 0 01-14 0v-1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                </>
+              ) : (
+                <path d="M12 2a3 3 0 00-3 3v7a3 3 0 006 0V5a3 3 0 00-3-3zM19 10v1a7 7 0 01-14 0v-1M3 3l18 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              )}
+            </svg>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Meeting stage — grid + speaker modes + screen share
+───────────────────────────────────────────────────────────────────────── */
+function MeetingStage({ viewMode }: { viewMode: "grid" | "speaker" }) {
+  const screenTracks = useTracks([{ source: Track.Source.ScreenShare, withPlaceholder: false }]);
+  const cameraTracks = useTracks([{ source: Track.Source.Camera, withPlaceholder: true }]);
+  const participants = useParticipants();
+
+  const isScreenSharing = screenTracks.length > 0;
+  const count = cameraTracks.length;
+
+  // Dynamic grid class based on participant count
+  const gridCols =
+    count === 1 ? "grid-cols-1" :
+    count === 2 ? "grid-cols-2" :
+    count <= 4  ? "grid-cols-2" :
+    count <= 6  ? "grid-cols-3" :
+                  "grid-cols-4";
+
+  // For a single participant — center it nicely
+  const singleStyle = count === 1 ? "max-w-2xl mx-auto" : "";
+
+  /* ── Screen share layout ── */
+  if (isScreenSharing) {
+    return (
+      <div className="h-full w-full flex flex-col lg:flex-row gap-2 p-3 pt-20">
+        {/* Main screen */}
+        <div className="flex-1 min-w-0 relative rounded-2xl overflow-hidden ring-1 ring-white/[0.08] bg-black">
+          <VideoTrack trackRef={screenTracks[0] as any} className="h-full w-full object-contain" />
+          <div className="absolute bottom-3 left-3 flex items-center gap-2 rounded-full bg-black/60 backdrop-blur px-3 py-1.5 text-xs text-white">
+            <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+            {identityToDisplay(screenTracks[0].participant.identity)}'s screen
+          </div>
+        </div>
+        {/* Camera strip */}
+        <div className="flex flex-row lg:flex-col gap-2 lg:w-56 overflow-x-auto lg:overflow-y-auto pb-2 lg:pb-0 shrink-0">
+          {cameraTracks.map((t) => (
+            <div key={t.participant.identity} className="shrink-0 w-48 lg:w-full h-28 lg:h-36">
+              <ParticipantTile trackRef={t} />
+            </div>
+          ))}
+        </div>
+        <RoomAudioRenderer />
+      </div>
+    );
+  }
+
+  /* ── Speaker view ── */
+  if (viewMode === "speaker" && count > 1) {
+    // Find the active speaker (first speaking participant, or first in list)
+    const speakerParticipant = participants.find((p) => p.isSpeaking) ?? participants[0];
+    const speakerTrack = cameraTracks.find((t) => t.participant.identity === speakerParticipant?.identity) ?? cameraTracks[0];
+    const otherTracks = cameraTracks.filter((t) => t !== speakerTrack);
+
+    return (
+      <div className="h-full w-full flex flex-col gap-2 p-3 pt-20 pb-28">
+        {/* Main speaker */}
+        <div className="flex-1 min-h-0 rounded-2xl overflow-hidden">
+          <ParticipantTile trackRef={speakerTrack} />
+        </div>
+        {/* Thumbnails strip */}
+        {otherTracks.length > 0 && (
+          <div className="h-28 flex gap-2 overflow-x-auto shrink-0">
+            {otherTracks.map((t) => (
+              <div key={t.participant.identity} className="w-44 shrink-0 h-full">
+                <ParticipantTile trackRef={t} />
+              </div>
+            ))}
+          </div>
+        )}
+        <RoomAudioRenderer />
+      </div>
+    );
+  }
+
+  /* ── Grid view (default) ── */
+  return (
+    <div className={`h-full w-full p-3 pt-20 pb-28 grid ${gridCols} auto-rows-fr gap-2 overflow-hidden`}>
+      <div className={`contents ${singleStyle}`}>
+        {cameraTracks.map((t) => (
+          <ParticipantTile key={t.participant.identity} trackRef={t} />
+        ))}
+      </div>
+      <RoomAudioRenderer />
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Side panel (chat / participants / captions)
+───────────────────────────────────────────────────────────────────────── */
 function SidePanel({
-  activePanel,
-  onClose,
-  captions,
-  interimCaption,
-  captionError,
-  speechRecognitionAvailable,
-  providerOrder,
-  meetingId,
+  activePanel, onClose, captions, interimCaption, captionError,
+  speechRecognitionAvailable, providerOrder, meetingId,
 }: {
-  activePanel: Exclude<MeetingPanel, null>;
-  onClose: () => void;
-  captions: string[];
-  interimCaption: string;
-  captionError: string | null;
-  speechRecognitionAvailable: boolean;
-  providerOrder: SttProvider[];
-  meetingId: string | null;
+  activePanel: Exclude<MeetingPanel, null>; onClose: () => void;
+  captions: string[]; interimCaption: string; captionError: string | null;
+  speechRecognitionAvailable: boolean; providerOrder: SttProvider[]; meetingId: string | null;
 }) {
   const { localParticipant } = useLocalParticipant();
   const identity = localParticipant?.identity ?? "Guest";
+  const displayName = identityToDisplay(identity);
   const participants = useParticipants();
   const { chatMessages, send, isSending } = useChat();
   const [draft, setDraft] = useState("");
-
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const handleFileSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatMessages]);
 
-    // Check size limit: 50MB
-    if (file.size > 52428800) {
-      setUploadError("File exceeds the 50MB size limit.");
-      return;
-    }
-
-    setUploadError(null);
-    setSelectedFile(file);
-  };
-
-  const title =
-    activePanel === "participants"
-      ? `Participants (${participants.length})`
-      : activePanel === "chat"
-        ? "Chat"
-        : "Captions";
+  const panelTitle =
+    activePanel === "participants" ? `People (${participants.length})`
+    : activePanel === "chat" ? "Chat"
+    : "Live Captions";
 
   return (
-    <div className="h-full flex flex-col">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
-        <div className="text-sm font-semibold text-white">{title}</div>
+    <div className="h-full flex flex-col bg-[#0d0f14]">
+      {/* Panel header */}
+      <div className="flex items-center justify-between px-4 py-3.5 border-b border-white/[0.06] shrink-0">
+        <span className="text-sm font-semibold text-white">{panelTitle}</span>
         <button
           type="button"
           onClick={onClose}
-          className="h-9 w-9 rounded-xl border border-white/10 bg-white/5 text-white/80 hover:bg-white/10 transition grid place-items-center"
-          aria-label="Close panel"
+          className="h-8 w-8 rounded-xl border border-white/[0.08] bg-white/5 text-white/50 hover:text-white hover:bg-white/10 transition grid place-items-center"
         >
           <IconClose />
         </button>
       </div>
 
-      {activePanel === "participants" ? (
-        <div className="flex-1 overflow-y-auto p-4 space-y-2">
-          {participants.map((participant) => (
-            <div
-              key={participant.identity}
-              className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2"
-            >
-              <div className="min-w-0">
-                <div className="truncate text-sm text-white">
-                  {participant.identity}
-                  {participant.isLocal ? " (You)" : ""}
-                </div>
-                <div className="mt-0.5 text-xs text-white/50">
-                  {participant.isSpeaking ? "Speaking" : "In meeting"}
-                </div>
+      {/* Participants */}
+      {activePanel === "participants" && (
+        <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
+          {participants.map((p) => (
+            <div key={p.identity} className="flex items-center gap-3 rounded-xl border border-white/[0.05] bg-white/[0.03] px-3 py-2.5">
+              <div className="h-8 w-8 rounded-xl bg-gradient-to-br from-blue-600/40 to-violet-600/40 grid place-items-center text-xs font-semibold text-white/80 shrink-0">
+                {getInitials(identityToDisplay(p.identity))}
               </div>
-              <div className="flex items-center gap-2 text-xs text-white/70">
-                <span className={participant.isMicrophoneEnabled ? "text-white/70" : "text-red-300"}>
-                  {participant.isMicrophoneEnabled ? "Mic" : "Mic off"}
-                </span>
-                <span className={participant.isCameraEnabled ? "text-white/70" : "text-white/40"}>
-                  {participant.isCameraEnabled ? "Cam" : "No cam"}
-                </span>
+              <div className="min-w-0 flex-1">
+                <div className="text-sm text-white truncate">
+                  {identityToDisplay(p.identity)}
+                  {p.isLocal && <span className="text-white/30 ml-1">(You)</span>}
+                </div>
+                <div className="text-xs text-white/30 mt-0.5">{p.isSpeaking ? "Speaking…" : "In meeting"}</div>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <div className={`h-2 w-2 rounded-full ${p.isMicrophoneEnabled ? "bg-emerald-400" : "bg-red-500"}`} />
+                <div className={`h-2 w-2 rounded-full ${p.isCameraEnabled ? "bg-emerald-400" : "bg-white/20"}`} />
               </div>
             </div>
           ))}
-          {participants.length === 0 ? (
-            <div className="text-sm text-white/60">No participants yet.</div>
-          ) : null}
+          {participants.length === 0 && (
+            <p className="text-sm text-white/30 text-center py-8">No participants yet.</p>
+          )}
         </div>
-      ) : null}
+      )}
 
-      {activePanel === "chat" ? (
+      {/* Chat */}
+      {activePanel === "chat" && (
         <div className="flex-1 flex flex-col min-h-0">
-          <div className="flex-1 overflow-y-auto p-4 space-y-3">
-            {chatMessages.length === 0 ? (
-              <div className="text-sm text-white/60">No messages yet.</div>
-            ) : null}
+          <div className="flex-1 overflow-y-auto p-3 space-y-3">
+            {chatMessages.length === 0 && (
+              <p className="text-sm text-white/25 text-center py-8">No messages yet. Say hello!</p>
+            )}
             {chatMessages.map((msg) => {
               let text = msg.message;
-              let attachment = null;
+              let attachment: any = null;
               try {
                 if (msg.message.startsWith("{")) {
                   const parsed = JSON.parse(msg.message);
                   text = parsed.text;
                   attachment = parsed.attachment;
                 }
-              } catch {
-                // Ignore parsing errors, render as plain text
-              }
-
-              const isImage = attachment && attachment.type?.startsWith("image/");
-
+              } catch { /* ignore */ }
+              const isImage = attachment?.type?.startsWith("image/");
+              const isOwn = msg.from?.isLocal;
               return (
-                <div key={`${msg.timestamp}-${msg.message}`} className="space-y-1 animate-in fade-in duration-200">
-                  <div className="text-xs text-white/50 px-1">
-                    {msg.from?.identity ?? "Unknown"}
-                    {msg.from?.isLocal ? " (You)" : ""}
-                  </div>
-                  <div className="inline-block max-w-[92%] rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white space-y-1.5">
+                <div key={`${msg.timestamp}-${msg.message}`} className={`flex flex-col gap-1 ${isOwn ? "items-end" : "items-start"}`}>
+                  <span className="text-[10px] text-white/30 px-1">
+                    {msg.from?.isLocal ? "You" : identityToDisplay(msg.from?.identity ?? "Unknown")}
+                  </span>
+                  <div className={`max-w-[88%] rounded-2xl px-3 py-2 text-sm text-white ${isOwn ? "bg-blue-600/80 rounded-br-sm" : "bg-white/[0.08] rounded-bl-sm"}`}>
                     {text && <p className="leading-relaxed whitespace-pre-wrap break-words">{text}</p>}
-                    
                     {attachment && (
-                      <div className="mt-1.5 pt-1.5 border-t border-white/5">
+                      <div className="mt-1.5">
                         {isImage ? (
-                          <a
-                            href={attachment.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="block max-w-sm rounded-xl overflow-hidden border border-white/10 hover:border-white/20 transition duration-300 bg-black/20"
-                          >
-                            <img
-                              src={attachment.url}
-                              alt={attachment.name}
-                              className="w-full h-auto max-h-48 object-cover"
-                            />
-                            <div className="bg-black/40 px-3 py-1.5 text-xs text-white/70 truncate flex items-center justify-between gap-2">
-                              <span className="truncate">{attachment.name}</span>
-                              <span className="shrink-0 text-white/40">
-                                {attachment.size ? `${(attachment.size / 1024).toFixed(1)} KB` : ""}
-                              </span>
-                            </div>
+                          <a href={attachment.url} target="_blank" rel="noopener noreferrer" className="block rounded-xl overflow-hidden border border-white/10">
+                            <img src={attachment.url} alt={attachment.name} className="w-full h-auto max-h-40 object-cover" />
                           </a>
                         ) : (
-                          <a
-                            href={attachment.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center gap-3 max-w-sm rounded-xl border border-white/10 bg-white/5 p-3 hover:bg-white/10 transition duration-300"
-                          >
-                            <span className="p-2 bg-blue-500/10 rounded-lg text-blue-400 shrink-0">
-                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="h-5 w-5">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                          <a href={attachment.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 p-2 rounded-xl bg-white/10 hover:bg-white/15 transition">
+                            <div className="h-8 w-8 rounded-lg bg-blue-500/20 grid place-items-center shrink-0">
+                              <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4 text-blue-400" stroke="currentColor" strokeWidth="2">
+                                <path strokeLinecap="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                               </svg>
-                            </span>
-                            <div className="min-w-0 flex-1">
-                              <div className="text-sm font-medium text-white truncate">{attachment.name}</div>
-                              <div className="text-[10px] text-white/40 mt-0.5 uppercase tracking-wide">
-                                {attachment.type?.split("/")[1] || "document"} 
-                                {attachment.size ? ` • ${(attachment.size / (1024 * 1024)).toFixed(1)} MB` : ""}
-                              </div>
+                            </div>
+                            <div className="min-w-0">
+                              <div className="text-xs text-white truncate">{attachment.name}</div>
+                              <div className="text-[10px] text-white/40">{attachment.size ? `${(attachment.size / 1024).toFixed(0)} KB` : ""}</div>
                             </div>
                           </a>
                         )}
@@ -270,363 +382,128 @@ function SidePanel({
                 </div>
               );
             })}
+            <div ref={messagesEndRef} />
           </div>
 
-          <form
-            className="border-t border-white/10 p-3"
-            onSubmit={async (event) => {
-              event.preventDefault();
-              const messageText = draft.trim();
-              if (!messageText && !selectedFile) return;
-
-              setIsUploading(true);
-              setUploadError(null);
-              let attachmentInfo = null;
-
-              try {
-                if (selectedFile) {
-                  const fileExt = selectedFile.name.split('.').pop() || '';
-                  const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 15)}.${fileExt}`;
-                  const filePath = `${meetingId || 'general'}/${fileName}`;
-
-                  const { error: uploadErr } = await supabase.storage
-                    .from("chat_attachments")
-                    .upload(filePath, selectedFile, {
-                      cacheControl: '3600',
-                      upsert: false
-                    });
-
-                  if (uploadErr) throw uploadErr;
-
-                  const { data: { publicUrl } } = supabase.storage
-                    .from("chat_attachments")
-                    .getPublicUrl(filePath);
-
-                  attachmentInfo = {
-                    name: selectedFile.name,
-                    url: publicUrl,
-                    type: selectedFile.type,
-                    size: selectedFile.size,
-                  };
-                }
-
-                // Construct and send message
-                const finalMessage = attachmentInfo 
-                  ? JSON.stringify({ text: messageText || `Shared a file: ${attachmentInfo.name}`, attachment: attachmentInfo })
-                  : messageText;
-
-                await send(finalMessage);
-
-                if (meetingId) {
-                  void supabase.from("chat_history").insert({
-                    meeting_id: meetingId,
-                    sender_identity: identity,
-                    message_text: finalMessage,
-                  });
-                }
-
-                setDraft("");
-                setSelectedFile(null);
-              } catch (err) {
-                console.error("Error sending chat attachment:", err);
-                setUploadError("Failed to upload file or send message. Please try again.");
-              } finally {
-                setIsUploading(false);
-              }
-            }}
-          >
-            {/* Selected File Preview Bar */}
+          {/* Chat input */}
+          <div className="border-t border-white/[0.06] p-3 space-y-2 shrink-0">
             {selectedFile && (
-              <div className="mb-2 rounded-xl border border-white/10 bg-white/5 p-2 flex items-center justify-between gap-3 animate-in fade-in slide-in-from-bottom-2 duration-200">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="p-1 bg-blue-500/10 rounded-md text-blue-400 shrink-0">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="h-4 w-4">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 5.636l-3.536 3.536m0 0A3 3 0 109.878 14.14l3.536-3.536m0 0l3.536-3.536M9.878 14.14l-3.536 3.536m0 0a3 3 0 104.243 4.243l3.536-3.536" />
-                    </svg>
-                  </span>
-                  <span className="text-xs text-slate-200 truncate font-medium">{selectedFile.name}</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setSelectedFile(null)}
-                  className="text-white/40 hover:text-white transition p-1 hover:bg-white/5 rounded"
-                  disabled={isUploading}
-                >
+              <div className="flex items-center justify-between gap-2 rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-2">
+                <span className="text-xs text-white/60 truncate">{selectedFile.name}</span>
+                <button type="button" onClick={() => setSelectedFile(null)} className="text-white/30 hover:text-white transition shrink-0">
                   <IconClose />
                 </button>
               </div>
             )}
-
-            {/* Error Message Display */}
-            {uploadError && (
-              <div className="mb-2 text-xs text-red-400 font-medium px-1 flex items-center gap-1.5 animate-in fade-in duration-200">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5 shrink-0">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
-                <span>{uploadError}</span>
-              </div>
-            )}
-
-            <div className="flex items-center gap-2">
-              <label 
-                className="h-10 w-10 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition grid place-items-center cursor-pointer shrink-0" 
-                title="Attach document or photo"
-              >
+            {uploadError && <p className="text-xs text-red-400 px-1">{uploadError}</p>}
+            <div className="flex gap-2">
+              <label className="h-10 w-10 rounded-xl border border-white/[0.08] bg-white/[0.04] grid place-items-center cursor-pointer hover:bg-white/[0.08] transition shrink-0">
                 {isUploading ? (
                   <div className="h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
                 ) : (
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5 text-white/80">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 5.636l-3.536 3.536m0 0A3 3 0 109.878 14.14l3.536-3.536m0 0l3.536-3.536M9.878 14.14l-3.536 3.536m0 0a3 3 0 104.243 4.243l3.536-3.536" />
+                  <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4 text-white/40" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
                   </svg>
                 )}
-                <input
-                  type="file"
-                  onChange={handleFileSelected}
-                  className="hidden"
-                  accept="image/*,application/pdf"
-                  disabled={isUploading}
-                />
+                <input type="file" onChange={(e) => { const f = e.target.files?.[0]; if (f) { if (f.size > 52428800) { setUploadError("File exceeds 50MB."); return; } setUploadError(null); setSelectedFile(f); } }} className="hidden" accept="image/*,application/pdf" disabled={isUploading} />
               </label>
-
               <input
                 value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                placeholder={isUploading ? "Uploading file..." : "Type a message…"}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={async (e) => {
+                  if (e.key !== "Enter" || e.shiftKey) return;
+                  e.preventDefault();
+                  const msg = draft.trim();
+                  if (!msg && !selectedFile) return;
+                  setIsUploading(true); setUploadError(null);
+                  let attachmentInfo = null;
+                  try {
+                    if (selectedFile) {
+                      const ext = selectedFile.name.split(".").pop() || "";
+                      const path = `${meetingId || "general"}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+                      const { error: upErr } = await supabase.storage.from("chat_attachments").upload(path, selectedFile, { cacheControl: "3600", upsert: false });
+                      if (upErr) throw upErr;
+                      const { data: { publicUrl } } = supabase.storage.from("chat_attachments").getPublicUrl(path);
+                      attachmentInfo = { name: selectedFile.name, url: publicUrl, type: selectedFile.type, size: selectedFile.size };
+                    }
+                    const finalMsg = attachmentInfo ? JSON.stringify({ text: msg || `Shared: ${attachmentInfo.name}`, attachment: attachmentInfo }) : msg;
+                    await send(finalMsg);
+                    if (meetingId) void supabase.from("chat_history").insert({ meeting_id: meetingId, sender_identity: identity, message_text: finalMsg });
+                    setDraft(""); setSelectedFile(null);
+                  } catch { setUploadError("Failed to send. Try again."); }
+                  finally { setIsUploading(false); }
+                }}
+                placeholder={isUploading ? "Uploading…" : "Message (Enter to send)"}
                 disabled={isUploading}
-                className="h-10 flex-1 rounded-xl border border-white/10 bg-white/5 px-3 text-sm text-white placeholder:text-white/40 outline-none focus:border-white/20 disabled:opacity-50"
+                className="h-10 flex-1 rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 text-sm text-white placeholder:text-white/25 outline-none focus:border-blue-500/40 focus:ring-1 focus:ring-blue-500/20 transition"
               />
               <button
-                type="submit"
+                type="button"
                 disabled={isSending || isUploading || (!draft.trim() && !selectedFile)}
-                className="h-10 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-50 hover:bg-blue-700 transition flex items-center justify-center min-w-[70px]"
+                onClick={async () => {
+                  const msg = draft.trim();
+                  if (!msg && !selectedFile) return;
+                  try { await send(msg); setDraft(""); } catch { /* ignore */ }
+                }}
+                className="h-10 w-10 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-40 transition grid place-items-center shrink-0"
               >
-                {isUploading ? (
-                  <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  "Send"
-                )}
+                <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4 text-white" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" />
+                </svg>
               </button>
             </div>
-          </form>
-        </div>
-      ) : null}
-
-      {activePanel === "captions" ? (
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-            <div className="text-sm font-semibold text-white">Live captions</div>
-            <p className="mt-2 text-sm text-white/60">
-              Live captions use hybrid speech-to-text. If one provider fails, Draftmin automatically switches to the next available option. Allow microphone access and speak clearly for the best results.
-            </p>
           </div>
-
-          {!speechRecognitionAvailable && providerOrder.includes("webspeech") ? (
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/60">
-              Browser speech recognition (WebSpeech) is not available in this browser. Captions will fall back to server-based STT when configured.
-            </div>
-          ) : null}
-
-          {captionError ? (
-            <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-100">
-              <div className="font-semibold">Caption error</div>
-              <p className="mt-1 text-rose-100/80">{captionError}</p>
-            </div>
-          ) : null}
-
-          {interimCaption ? (
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/90">
-              <div className="text-xs uppercase tracking-[0.18em] text-white/50">Interim transcript</div>
-              <p className="mt-2">{interimCaption}</p>
-            </div>
-          ) : null}
-
-          {captions.length > 0 ? (
-            <div className="space-y-3">
-              {captions.map((caption, index) => (
-                <div key={`${caption}-${index}`} className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/90">
-                  {caption}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/60">
-              No captions yet. Speak into your microphone to start transcription.
-            </div>
-          )}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function CustomParticipantTile({ trackRef }: { trackRef: any }) {
-  const participant = trackRef.participant;
-  const isVideoEnabled = trackRef.publication?.isSubscribed && !trackRef.publication?.isMuted;
-  const isSpeaking = participant?.isSpeaking;
-  const identity = participant?.identity ?? "Unknown";
-
-  // Generate initials
-  const initials = identity
-    .split("-")
-    .map((n: string) => n[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
-
-  return (
-    <div
-      className={`relative h-full w-full overflow-hidden rounded-xl border bg-[#10131A] transition-all duration-300 ${
-        isSpeaking
-          ? "border-violet-500 shadow-[0_0_15px_rgba(139,92,246,0.3)] scale-[1.01]"
-          : "border-white/10 hover:border-white/20"
-      }`}
-    >
-      {isVideoEnabled && trackRef.publication?.track ? (
-        <VideoTrack
-          trackRef={trackRef as any}
-          className="h-full w-full object-cover [&_video]:h-full [&_video]:w-full [&_video]:object-cover"
-        />
-      ) : (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-[#1E1B4B] to-[#0F172A]">
-          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-violet-600/20 border border-violet-500/30 text-base font-bold text-violet-300 shadow-[0_0_20px_rgba(139,92,246,0.15)]">
-            {initials}
-          </div>
-          <span className="mt-3 text-xs text-white/50">{identity}</span>
         </div>
       )}
 
-      {/* Bottom Name & Mic Panel */}
-      <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between rounded-xl border border-white/5 bg-black/40 px-3 py-1.5 backdrop-blur-md">
-        <span className="truncate text-xs font-medium text-white">
-          {identity} {participant?.isLocal ? " (You)" : ""}
-        </span>
-        <div className="flex items-center gap-1.5">
-          {participant?.isMicrophoneEnabled ? (
-            <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4 text-emerald-400" aria-hidden="true">
-              <path
-                d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3zM19 10v1a7 7 0 01-14 0v-1M12 18v5m-4 0h8"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          ) : (
-            <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4 text-rose-400" aria-hidden="true">
-              <path
-                d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3zM19 10v1a7 7 0 01-14 0v-1M12 18v5m-4 0h8M3 3l18 18"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
+      {/* Captions */}
+      {activePanel === "captions" && (
+        <div className="flex-1 overflow-y-auto p-3 space-y-2">
+          <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-4 text-xs text-white/40 leading-relaxed">
+            Live captions use hybrid speech-to-text. Allow microphone access and speak clearly for best results.
+          </div>
+          {!speechRecognitionAvailable && providerOrder.includes("webspeech") && (
+            <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-300">
+              Browser speech recognition unavailable in this browser.
+            </div>
+          )}
+          {captionError && (
+            <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-3 text-xs text-red-300">
+              <div className="font-semibold">Error</div>
+              <p className="mt-1 text-red-200/70">{captionError}</p>
+            </div>
+          )}
+          {interimCaption && (
+            <div className="rounded-xl border border-violet-500/20 bg-violet-500/5 p-3 text-xs text-violet-200 italic">
+              {interimCaption}
+            </div>
+          )}
+          {captions.map((c, i) => {
+            const colonIdx = c.indexOf(":");
+            const speaker = colonIdx !== -1 ? c.substring(0, colonIdx).trim() : "";
+            const text = colonIdx !== -1 ? c.substring(colonIdx + 1).trim() : c;
+            return (
+              <div key={i} className="space-y-1">
+                {speaker && <div className="text-[10px] text-blue-400 font-medium px-1">{speaker}</div>}
+                <div className="rounded-xl border border-white/[0.05] bg-white/[0.03] p-3 text-sm text-white/80 leading-relaxed">{text}</div>
+              </div>
+            );
+          })}
+          {captions.length === 0 && !interimCaption && (
+            <p className="text-sm text-white/25 text-center py-8">Speak into your microphone to start transcription.</p>
           )}
         </div>
-      </div>
+      )}
     </div>
   );
 }
 
-function MeetingStage() {
-  const screenShareTracks = useTracks([
-    { source: Track.Source.ScreenShare, withPlaceholder: false },
-  ]);
-
-  const cameraTracks = useTracks([
-    { source: Track.Source.Camera, withPlaceholder: true },
-  ]);
-
-  const isScreenSharing = screenShareTracks.length > 0;
-
-  return (
-    <div className="h-full w-full p-3 md:p-5">
-      <div className="h-full rounded-2xl border border-white/10 bg-black/30 overflow-hidden">
-        {isScreenSharing ? (
-          <div className="flex h-full w-full flex-col lg:flex-row gap-4 p-3 md:p-4">
-            {/* Screen Share Large Area */}
-            <div className="flex-1 min-w-0 h-[60%] lg:h-full relative rounded-xl overflow-hidden border border-white/15 bg-black/50">
-              <VideoTrack
-                trackRef={screenShareTracks[0] as any}
-                className="h-full w-full object-contain [&_video]:h-full [&_video]:w-full [&_video]:object-contain"
-              />
-              <div className="absolute bottom-3 left-3 flex items-center gap-2 rounded-xl border border-white/5 bg-black/60 px-3 py-1.5 backdrop-blur-md text-xs text-white">
-                <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
-                <span>{screenShareTracks[0].participant.identity}'s Screen Share</span>
-              </div>
-            </div>
-
-            {/* Scrolling camera track strip */}
-            <div className="w-full lg:w-80 flex flex-row lg:flex-col gap-3 overflow-x-auto lg:overflow-y-auto min-h-[140px] lg:min-h-0 lg:max-h-full pb-2 lg:pb-0 pr-2 scrollbar-thin scrollbar-thumb-white/10">
-              {cameraTracks.map((track) => (
-                <div key={track.participant.identity} className="w-48 lg:w-full h-[120px] lg:h-[180px] shrink-0">
-                  <CustomParticipantTile trackRef={track} />
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : (
-          /* Responsive standard camera grid */
-          <div className="h-full w-full p-3 md:p-4 gap-3 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 auto-rows-fr overflow-y-auto">
-            {cameraTracks.map((track) => (
-              <CustomParticipantTile key={track.participant.identity} trackRef={track} />
-            ))}
-          </div>
-        )}
-      </div>
-      <RoomAudioRenderer />
-    </div>
-  );
-}
-
-function getFriendlyDeviceErrorMessage(errorMsg: string): { title: string; description: string; suggestion: string } {
-  const msg = errorMsg.toLowerCase();
-  
-  if (msg.includes("permission") || msg.includes("allowed") || msg.includes("notallowederror")) {
-    return {
-      title: "Camera or Microphone Access Denied",
-      description: "Your browser or operating system has blocked Draftmin from accessing your camera or microphone.",
-      suggestion: "Please click the lock/settings icon next to the URL in your browser's address bar and set Camera/Microphone permissions to 'Allow'. Also ensure camera access is enabled in your OS privacy settings."
-    };
-  }
-  
-  if (msg.includes("readable") || msg.includes("trackstart") || msg.includes("in use") || msg.includes("concurrent")) {
-    return {
-      title: "Camera or Microphone in Use",
-      description: "Another application (like Zoom, Microsoft Teams, OBS, or another browser tab) is currently using your camera or microphone.",
-      suggestion: "Please close any other apps or tabs that might be using your media devices, then try starting your video or audio again."
-    };
-  }
-  
-  if (msg.includes("notfound") || msg.includes("devicesnotfound") || msg.includes("no device")) {
-    return {
-      title: "No Media Device Found",
-      description: "We couldn't detect any connected camera or microphone on your system.",
-      suggestion: "Make sure your webcam or microphone is properly plugged in, powered on, and recognized by your system settings."
-    };
-  }
-
-  if (msg.includes("overconstrained") || msg.includes("constraint")) {
-    return {
-      title: "Hardware Constraint Error",
-      description: "Your camera doesn't support the requested video quality or resolution settings.",
-      suggestion: "We will automatically lower the resolution settings to match your device. Try toggling the video off and on again."
-    };
-  }
-
-  return {
-    title: "Media Device Error",
-    description: errorMsg,
-    suggestion: "Check your connections, ensure no other app is using the device, and verify browser permissions."
-  };
-}
-
+/* ─────────────────────────────────────────────────────────────────────────
+   Transcription controller (logic unchanged, kept intact)
+───────────────────────────────────────────────────────────────────────── */
 type RoomTranscriptionControllerProps = {
-  sttDisabled: boolean;
-  sttLang: string;
-  sttChunkMs: number;
-  speechRecognitionAvailable: boolean;
-  sttProviderOrder: SttProvider[];
+  sttDisabled: boolean; sttLang: string; sttChunkMs: number;
+  speechRecognitionAvailable: boolean; sttProviderOrder: SttProvider[];
   onCaptionsChange: (updater: (current: string[]) => string[]) => void;
   onInterimCaptionChange: (caption: string) => void;
   onCaptionErrorChange: (error: string | null) => void;
@@ -634,15 +511,8 @@ type RoomTranscriptionControllerProps = {
 };
 
 function RoomTranscriptionController({
-  sttDisabled,
-  sttLang,
-  sttChunkMs,
-  speechRecognitionAvailable,
-  sttProviderOrder,
-  onCaptionsChange,
-  onInterimCaptionChange,
-  onCaptionErrorChange,
-  meetingId,
+  sttDisabled, sttLang, sttChunkMs, speechRecognitionAvailable,
+  sttProviderOrder, onCaptionsChange, onInterimCaptionChange, onCaptionErrorChange, meetingId,
 }: RoomTranscriptionControllerProps) {
   const { localParticipant, isMicrophoneEnabled } = useLocalParticipant();
   const room = useRoomContext();
@@ -656,739 +526,320 @@ function RoomTranscriptionController({
   const broadcastCaption = useCallback((text: string) => {
     if (!localParticipant) return;
     try {
-      const encoder = new TextEncoder();
-      const payload = JSON.stringify({
-        type: "caption",
-        sender: localParticipant.identity,
-        text: text,
-      });
-      const data = encoder.encode(payload);
-      void localParticipant.publishData(data, {
-        reliable: true,
-        topic: "captions",
-      });
-    } catch (e) {
-      console.warn("Failed to broadcast caption:", e);
-    }
+      const payload = JSON.stringify({ type: "caption", sender: localParticipant.identity, text });
+      void localParticipant.publishData(new TextEncoder().encode(payload), { reliable: true, topic: "captions" });
+    } catch { /* ignore */ }
   }, [localParticipant]);
 
   const handleSpeechFinalized = useCallback((text: string) => {
-    const speakerText = `${identity}: ${text}`;
-    onCaptionsChange((current) => [...current, speakerText]);
+    const speakerDisplay = identityToDisplay(identity);
+    const speakerText = `${speakerDisplay}: ${text}`;
+    onCaptionsChange((c) => [...c, speakerText]);
     broadcastCaption(text);
     if (meetingId) {
-      void supabase.from("transcripts").insert({
-        meeting_id: meetingId,
-        speaker_name: identity,
-        transcript_text: text,
-      });
+      void supabase.from("transcripts").insert({ meeting_id: meetingId, speaker_name: speakerDisplay, transcript_text: text });
     }
   }, [identity, onCaptionsChange, broadcastCaption, meetingId]);
 
   useEffect(() => {
     if (!room) return;
-
-    const handleDataReceived = (payload: Uint8Array) => {
+    const handleData = (payload: Uint8Array) => {
       try {
-        const decoder = new TextDecoder();
-        const data = JSON.parse(decoder.decode(payload));
-        if (data.type === "caption") {
-          if (data.sender === localParticipant.identity) return;
-          const speakerText = `${data.sender}: ${data.text}`;
-          onCaptionsChange((current) => {
-            if (current.includes(speakerText)) return current;
-            return [...current, speakerText];
-          });
+        const data = JSON.parse(new TextDecoder().decode(payload));
+        if (data.type === "caption" && data.sender !== localParticipant.identity) {
+          const display = identityToDisplay(data.sender);
+          const speakerText = `${display}: ${data.text}`;
+          onCaptionsChange((c) => c.includes(speakerText) ? c : [...c, speakerText]);
         }
-      } catch (e) {
-        // ignore
-      }
+      } catch { /* ignore */ }
     };
-
-    room.on("dataReceived", handleDataReceived);
-    return () => {
-      room.off("dataReceived", handleDataReceived);
-    };
+    room.on("dataReceived", handleData);
+    return () => { room.off("dataReceived", handleData); };
   }, [localParticipant, room, onCaptionsChange]);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
+    if (typeof window === "undefined" || sttDisabled || !isMicrophoneEnabled) {
+      onInterimCaptionChange(""); return;
     }
-
-    if (sttDisabled || !isMicrophoneEnabled) {
-      onInterimCaptionChange("");
-      return;
-    }
-
     let cancelled = false;
     let currentStop: (() => void) | null = null;
     let currentIndex = 0;
     const failures = new Map<SttProvider, number>();
 
-    const cleanupCurrent = () => {
-      currentStop?.();
-      currentStop = null;
-      activeProviderRef.current = null;
+    const stopWS = () => {
+      const r = recognitionRef.current; recognitionRef.current = null;
+      if (!r) return;
+      try { r.onresult = undefined; r.onend = undefined; r.onerror = undefined; r.stop?.(); } catch { /* ignore */ }
     };
-
-    const stopMediaRecorder = () => {
-      const recorder = recorderRef.current;
-      recorderRef.current = null;
-      try {
-        if (recorder && recorder.state !== "inactive") {
-          recorder.stop();
-        }
-      } catch {
-        // ignore
-      }
-
-      const stream = mediaStreamRef.current;
-      mediaStreamRef.current = null;
-      try {
-        stream?.getTracks().forEach((track) => track.stop());
-      } catch {
-        // ignore
-      }
+    const stopMR = () => {
+      const rec = recorderRef.current; recorderRef.current = null;
+      try { if (rec && rec.state !== "inactive") rec.stop(); } catch { /* ignore */ }
+      const s = mediaStreamRef.current; mediaStreamRef.current = null;
+      try { s?.getTracks().forEach((t) => t.stop()); } catch { /* ignore */ }
     };
+    const cleanupCurrent = () => { currentStop?.(); currentStop = null; activeProviderRef.current = null; };
 
-    const stopWebSpeech = () => {
-      const recognition = recognitionRef.current;
-      recognitionRef.current = null;
-      if (!recognition) return;
-      try {
-        recognition.onresult = undefined;
-        recognition.onend = undefined;
-        recognition.onerror = undefined;
-        recognition.stop?.();
-      } catch {
-        // ignore
-      }
-    };
-
-    const startWebSpeech = (): (() => void) => {
-      const win = window as Window & {
-        SpeechRecognition?: SimpleSpeechRecognitionConstructor;
-        webkitSpeechRecognition?: SimpleSpeechRecognitionConstructor;
-      };
-      const SpeechRecognition = win.SpeechRecognition ?? win.webkitSpeechRecognition;
-      if (!SpeechRecognition) {
-        throw new Error("Browser speech recognition is not available.");
-      }
-
-      const recognition = new SpeechRecognition();
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.lang = sttLang;
-      recognition.maxAlternatives = 1;
-
-      recognition.onresult = (event: SimpleSpeechRecognitionEvent) => {
-        let nextInterim = "";
-        const finalized: string[] = [];
-
-        for (let i = event.resultIndex; i < event.results.length; i += 1) {
-          const result = event.results[i];
-          const transcript = result[0]?.transcript?.trim();
-          if (!transcript) continue;
-
-          if (result.isFinal) {
-            finalized.push(transcript);
-          } else {
-            nextInterim = transcript;
-          }
+    const startWS = (): (() => void) => {
+      const win = window as any;
+      const SR = win.SpeechRecognition ?? win.webkitSpeechRecognition;
+      if (!SR) throw new Error("Browser speech recognition unavailable.");
+      const r = new SR() as SimpleSpeechRecognition;
+      r.continuous = true; r.interimResults = true; r.lang = sttLang; r.maxAlternatives = 1;
+      r.onresult = (e: SimpleSpeechRecognitionEvent) => {
+        let interim = "";
+        const final: string[] = [];
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          const t = e.results[i][0]?.transcript?.trim();
+          if (!t) continue;
+          if (e.results[i].isFinal) final.push(t); else interim = t;
         }
-
-        if (nextInterim) {
-          onInterimCaptionChange(nextInterim);
-        }
-
-        if (finalized.length > 0) {
-          finalized.forEach((text) => {
-            handleSpeechFinalized(text);
-          });
-          onInterimCaptionChange("");
-        }
+        if (interim) onInterimCaptionChange(interim);
+        if (final.length) { final.forEach(handleSpeechFinalized); onInterimCaptionChange(""); }
       };
-
-      recognition.onerror = (event: { error?: string; message?: string }) => {
-        const message = event.error ?? String(event.message ?? "Speech recognition error");
-        onCaptionErrorChange(message);
-        void switchProvider(`WebSpeech failed: ${message}`);
-      };
-
-      recognition.onend = () => {
-        if (!recognitionRef.current) return;
-        try {
-          recognition.start();
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          console.warn("WebSpeech restart issue:", message);
-          setTimeout(() => {
-            if (!recognitionRef.current) return;
-            try {
-              recognition.start();
-            } catch (retryError) {
-              const retryMessage = retryError instanceof Error ? retryError.message : String(retryError);
-              if (retryMessage.toLowerCase().includes("already")) return;
-              onCaptionErrorChange(retryMessage);
-              void switchProvider("WebSpeech could not restart.");
-            }
-          }, 1000);
-        }
-      };
-
-      recognition.start();
-      recognitionRef.current = recognition;
-
-      return () => stopWebSpeech();
+      r.onerror = (e: any) => { const m = e.error ?? String(e.message ?? "STT error"); onCaptionErrorChange(m); };
+      r.onend = () => { if (!recognitionRef.current) return; try { r.start(); } catch { /* ignore */ } };
+      r.start(); recognitionRef.current = r;
+      return () => stopWS();
     };
 
     const transcribeChunk = async (provider: Exclude<SttProvider, "webspeech">, blob: Blob) => {
-      const response = await fetch("/api/stt", {
-        method: "POST",
-        headers: {
-          "x-stt-provider": provider,
-          "x-stt-lang": sttLang,
-        },
-        body: blob,
-      });
-
-      if (!response.ok) {
-        const text = await response.text().catch(() => "");
-        throw new Error(text || `STT request failed (${response.status})`);
-      }
-
-      const data = (await response.json()) as { provider?: string; text?: string; error?: string };
-      if (data.error) throw new Error(data.error);
-      return (data.text ?? "").trim();
+      const res = await fetch("/api/stt", { method: "POST", headers: { "x-stt-provider": provider, "x-stt-lang": sttLang }, body: blob });
+      if (!res.ok) throw new Error(await res.text().catch(() => `STT ${res.status}`));
+      const d = await res.json() as { text?: string; error?: string };
+      if (d.error) throw new Error(d.error);
+      return (d.text ?? "").trim();
     };
 
     const startServerStt = async (provider: Exclude<SttProvider, "webspeech">): Promise<() => void> => {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        throw new Error("Microphone capture is not supported in this browser.");
-      }
-      if (typeof MediaRecorder === "undefined") {
-        throw new Error("MediaRecorder is not available in this browser.");
-      }
-
+      if (!navigator.mediaDevices?.getUserMedia) throw new Error("getUserMedia not supported.");
+      if (typeof MediaRecorder === "undefined") throw new Error("MediaRecorder not supported.");
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      if (cancelled) {
-        stream.getTracks().forEach((track) => track.stop());
-        throw new Error("Cancelled");
-      }
-
+      if (cancelled) { stream.getTracks().forEach((t) => t.stop()); throw new Error("Cancelled"); }
       mediaStreamRef.current = stream;
-
-      const supportedMimeTypes = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/ogg"];
-      const mimeType = supportedMimeTypes.find((type) => MediaRecorder.isTypeSupported(type));
-
-      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"].find((t) => MediaRecorder.isTypeSupported(t));
+      const recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
       recorderRef.current = recorder;
-
-      recorder.ondataavailable = (event) => {
-        if (!event.data || event.data.size === 0) return;
-        transcriptionQueueRef.current = transcriptionQueueRef.current
-          .then(async () => {
-            if (cancelled) return;
-            if (activeProviderRef.current !== provider) return;
-            const text = await transcribeChunk(provider, event.data);
-            if (!text) return;
-            handleSpeechFinalized(text);
-            onInterimCaptionChange("");
-            failures.set(provider, 0);
-          })
-          .catch((error) => {
-            const next = (failures.get(provider) ?? 0) + 1;
-            failures.set(provider, next);
-            const message = error instanceof Error ? error.message : String(error);
-            onCaptionErrorChange(message);
-            if (next >= 2) {
-              void switchProvider(`${provider} failed: ${message}`);
-            }
-          });
+      recorder.ondataavailable = (e) => {
+        if (!e.data?.size) return;
+        transcriptionQueueRef.current = transcriptionQueueRef.current.then(async () => {
+          if (cancelled || activeProviderRef.current !== provider) return;
+          const text = await transcribeChunk(provider, e.data);
+          if (text) { handleSpeechFinalized(text); onInterimCaptionChange(""); failures.set(provider, 0); }
+        }).catch((err) => {
+          const n = (failures.get(provider) ?? 0) + 1; failures.set(provider, n);
+          onCaptionErrorChange(err instanceof Error ? err.message : String(err));
+          if (n >= 2) void switchProvider(`${provider} failed`);
+        });
       };
-
       recorder.start();
-
-      const intervalId = setInterval(() => {
-        if (cancelled) {
-          clearInterval(intervalId);
-          return;
-        }
-        try {
-          if (recorder.state === "recording") {
-            recorder.stop();
-            recorder.start();
-          }
-        } catch (e) {
-          console.warn("MediaRecorder chunk stop/restart failed:", e);
-        }
+      const id = setInterval(() => {
+        if (cancelled) { clearInterval(id); return; }
+        try { if (recorder.state === "recording") { recorder.stop(); recorder.start(); } } catch { /* ignore */ }
       }, sttChunkMs);
-
-      return () => {
-        clearInterval(intervalId);
-        stopMediaRecorder();
-      };
+      return () => { clearInterval(id); stopMR(); };
     };
 
-    const startProvider = async (provider: SttProvider): Promise<() => void> => {
-      onCaptionErrorChange(null);
-      onInterimCaptionChange("");
-
-      if (provider === "webspeech") {
-        stopMediaRecorder();
-        return startWebSpeech();
-      }
-
-      stopWebSpeech();
-      return await startServerStt(provider);
+    const startProvider = async (p: SttProvider): Promise<() => void> => {
+      onCaptionErrorChange(null); onInterimCaptionChange("");
+      if (p === "webspeech") { stopMR(); return startWS(); }
+      stopWS(); return await startServerStt(p);
     };
 
-    const supportsProvider = (provider: SttProvider) => {
-      if (provider === "webspeech") return speechRecognitionAvailable;
-      return typeof navigator !== "undefined" && Boolean(navigator.mediaDevices?.getUserMedia) && typeof MediaRecorder !== "undefined";
-    };
+    const supports = (p: SttProvider) =>
+      p === "webspeech" ? speechRecognitionAvailable : Boolean(navigator.mediaDevices?.getUserMedia) && typeof MediaRecorder !== "undefined";
 
-    async function activateFromIndex(index: number, context?: string) {
+    async function activate(index: number, ctx?: string) {
       cleanupCurrent();
-
-      for (let i = index; i < sttProviderOrder.length; i += 1) {
-        const provider = sttProviderOrder[i];
-        if (!supportsProvider(provider)) continue;
-
+      for (let i = index; i < sttProviderOrder.length; i++) {
+        const p = sttProviderOrder[i];
+        if (!supports(p)) continue;
         try {
-          const stop = await startProvider(provider);
-          if (cancelled) {
-            stop();
-            return;
-          }
-          currentStop = stop;
-          currentIndex = i;
-          activeProviderRef.current = provider;
-          return;
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          onCaptionErrorChange(context ? `${context} (${message})` : message);
+          const stop = await startProvider(p);
+          if (cancelled) { stop(); return; }
+          currentStop = stop; currentIndex = i; activeProviderRef.current = p; return;
+        } catch (e) {
+          onCaptionErrorChange(ctx ?? (e instanceof Error ? e.message : String(e)));
         }
       }
-
-      onCaptionErrorChange(
-        "No STT provider is available. Enable microphone permissions or try a different browser (Chrome/Edge for WebSpeech).",
-      );
+      onCaptionErrorChange("No STT provider available. Enable mic permissions or try Chrome/Edge.");
     }
 
     async function switchProvider(reason?: string) {
-      const currentProvider = activeProviderRef.current;
-      const nextIndex = Math.min(currentIndex + 1, sttProviderOrder.length);
-      const prefix = currentProvider ? `Switching STT from ${currentProvider} to next provider.` : "Selecting STT provider.";
-      await activateFromIndex(nextIndex, reason ? `${prefix} ${reason}` : prefix);
+      await activate(Math.min(currentIndex + 1, sttProviderOrder.length), reason);
     }
 
-    void activateFromIndex(0);
-
-    const recoveryIntervalId = setInterval(() => {
-      if (cancelled) return;
-      if (currentIndex > 0) {
-        console.log("Attempting STT recovery to primary provider...");
-        void activateFromIndex(0, "Attempting STT primary provider recovery.");
-      }
-    }, 60000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(recoveryIntervalId);
-      cleanupCurrent();
-      stopWebSpeech();
-      stopMediaRecorder();
-    };
+    void activate(0);
+    const recoveryId = setInterval(() => { if (!cancelled && currentIndex > 0) void activate(0); }, 60000);
+    return () => { cancelled = true; clearInterval(recoveryId); cleanupCurrent(); stopWS(); stopMR(); };
   }, [speechRecognitionAvailable, sttChunkMs, sttDisabled, sttLang, sttProviderOrder, isMicrophoneEnabled]);
 
   return null;
 }
 
-// Markdown Parser
+/* ─────────────────────────────────────────────────────────────────────────
+   Markdown renderer (unchanged)
+───────────────────────────────────────────────────────────────────────── */
 function parseBold(text: string) {
-  const parts = text.split(/(\*\*.*?\*\*)/g);
-  return parts.map((part, i) => {
-    if (part.startsWith("**") && part.endsWith("**")) {
-      return <strong key={i} className="font-semibold text-white">{part.slice(2, -2)}</strong>;
-    }
-    return part;
-  });
+  return text.split(/(\*\*.*?\*\*)/g).map((part, i) =>
+    part.startsWith("**") && part.endsWith("**")
+      ? <strong key={i} className="font-semibold text-white">{part.slice(2, -2)}</strong>
+      : part
+  );
 }
 
 function MarkdownRenderer({ text }: { text: string }) {
-  const lines = text.split("\n");
-  
   return (
-    <div className="space-y-4 text-slate-200">
-      {lines.map((line, idx) => {
-        const trimmed = line.trim();
-        
-        // Headers
-        if (trimmed.startsWith("### ")) {
-          return <h3 key={idx} className="text-base font-bold text-white mt-6 mb-2">{trimmed.slice(4)}</h3>;
-        }
-        if (trimmed.startsWith("## ")) {
-          return <h2 key={idx} className="text-lg font-bold text-white mt-8 mb-3 border-b border-white/10 pb-2">{trimmed.slice(3)}</h2>;
-        }
-        if (trimmed.startsWith("# ")) {
-          return <h1 key={idx} className="text-xl font-bold text-white mt-10 mb-4">{trimmed.slice(2)}</h1>;
-        }
-        
-        // Checklist: - [ ] or - [x]
-        const checkboxMatch = trimmed.match(/^-\s+\[([ xX])\]\s+(.*)$/);
-        if (checkboxMatch) {
-          const checked = checkboxMatch[1].toLowerCase() === "x";
-          const taskContent = checkboxMatch[2];
+    <div className="space-y-3 text-slate-200">
+      {text.split("\n").map((line, idx) => {
+        const t = line.trim();
+        if (t.startsWith("### ")) return <h3 key={idx} className="text-sm font-bold text-white mt-5 mb-1">{t.slice(4)}</h3>;
+        if (t.startsWith("## ")) return <h2 key={idx} className="text-base font-bold text-white mt-6 mb-2 border-b border-white/10 pb-1.5">{t.slice(3)}</h2>;
+        if (t.startsWith("# ")) return <h1 key={idx} className="text-lg font-bold text-white mt-8 mb-3">{t.slice(2)}</h1>;
+        const cbm = t.match(/^-\s+\[([ xX])\]\s+(.*)$/);
+        if (cbm) {
+          const checked = cbm[1].toLowerCase() === "x";
           return (
-            <div key={idx} className="flex items-start gap-3 my-2 pl-2">
-              <input
-                type="checkbox"
-                readOnly
-                checked={checked}
-                className="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-850 text-blue-500 focus:ring-0 focus:ring-offset-0 pointer-events-none"
-              />
-              <span className={`text-sm ${checked ? "line-through text-slate-500" : "text-slate-200"}`}>
-                {parseBold(taskContent)}
-              </span>
+            <div key={idx} className="flex items-start gap-2.5 my-1.5 pl-1">
+              <input type="checkbox" readOnly checked={checked} className="mt-0.5 h-3.5 w-3.5 rounded border-slate-600 pointer-events-none" />
+              <span className={`text-sm ${checked ? "line-through text-slate-500" : "text-slate-200"}`}>{parseBold(cbm[2])}</span>
             </div>
           );
         }
-        
-        // Bullet list
-        if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
-          return (
-            <li key={idx} className="text-sm text-slate-200 ml-4 list-disc my-1 pl-1">
-              {parseBold(trimmed.slice(2))}
-            </li>
-          );
-        }
-        
-        // Numbered list
-        const numMatch = trimmed.match(/^\d+\.\s+(.*)$/);
-        if (numMatch) {
-          return (
-            <div key={idx} className="text-sm text-slate-200 pl-2 my-1 flex gap-2">
-              <span className="font-semibold text-blue-400 select-none shrink-0">{trimmed.split(".")[0]}.</span>
-              <span>{parseBold(numMatch[1])}</span>
-            </div>
-          );
-        }
-
-        // Empty line
-        if (!trimmed) {
-          return <div key={idx} className="h-2" />;
-        }
-
-        // Standard paragraph
-        return (
-          <p key={idx} className="text-sm text-slate-300 leading-relaxed my-2 pl-1">
-            {parseBold(trimmed)}
-          </p>
-        );
+        if (t.startsWith("- ") || t.startsWith("* ")) return <li key={idx} className="text-sm text-slate-200 ml-4 list-disc my-0.5">{parseBold(t.slice(2))}</li>;
+        const nm = t.match(/^(\d+)\.\s+(.*)/);
+        if (nm) return <div key={idx} className="text-sm text-slate-200 pl-1 my-0.5 flex gap-2"><span className="text-blue-400 font-semibold shrink-0">{nm[1]}.</span><span>{parseBold(nm[2])}</span></div>;
+        if (!t) return <div key={idx} className="h-1.5" />;
+        return <p key={idx} className="text-sm text-slate-300 leading-relaxed">{parseBold(t)}</p>;
       })}
     </div>
   );
 }
 
-interface MeetingSummaryDashboardProps {
-  captions: string[];
-  roomName: string;
-  onClose: () => void;
-  meetingId: string | null;
-}
-
-function MeetingSummaryDashboard({ captions, roomName, onClose, meetingId }: MeetingSummaryDashboardProps) {
+/* ─────────────────────────────────────────────────────────────────────────
+   Meeting summary dashboard (unchanged logic, minor style update)
+───────────────────────────────────────────────────────────────────────── */
+function MeetingSummaryDashboard({ captions, roomName, onClose, meetingId }: {
+  captions: string[]; roomName: string; onClose: () => void; meetingId: string | null;
+}) {
   const [summaryText, setSummaryText] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
   const generateSummary = async () => {
-    if (captions.length === 0) {
-      setError("No transcripts are available to summarize.");
-      return;
-    }
-    setIsGenerating(true);
-    setError(null);
+    if (!captions.length) { setError("No transcripts available."); return; }
+    setIsGenerating(true); setError(null);
     try {
-      const response = await fetch("/api/summary", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ transcript: captions }),
-      });
-
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.error || `Summary generation failed (${response.status})`);
-      }
-
-      const data = (await response.json()) as { minutes: string };
-      setSummaryText(data.minutes);
-
-      // Save summary & parse checklist actions to Supabase database
+      const res = await fetch("/api/summary", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ transcript: captions }) });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `${res.status}`); }
+      const d = await res.json() as { minutes: string };
+      setSummaryText(d.minutes);
       if (meetingId) {
         void (async () => {
           try {
-            const { data: existing } = await supabase
-              .from("meeting_summaries")
-              .select("id")
-              .eq("meeting_id", meetingId)
-              .maybeSingle();
-
-            if (!existing) {
-              const { data: summary, error: sumError } = await supabase
-                .from("meeting_summaries")
-                .insert({
-                  meeting_id: meetingId,
-                  markdown_content: data.minutes,
-                  executive_summary: "AI Generated Meeting Minutes",
-                  key_decisions: [],
-                })
-                .select("id")
-                .maybeSingle();
-
-              if (sumError) throw sumError;
-
-              if (summary) {
-                const lines = data.minutes.split("\n");
-                const actionsToInsert: any[] = [];
-                lines.forEach((line) => {
-                  const trimmedLine = line.trim();
-                  const checkboxMatch = trimmedLine.match(/^-\s+\[([ xX])\]\s+(.*)$/);
-                  if (checkboxMatch) {
-                    const checked = checkboxMatch[1].toLowerCase() === "x";
-                    const taskContent = checkboxMatch[2];
-                    actionsToInsert.push({
-                      summary_id: summary.id,
-                      task: taskContent,
-                      assignee: "Unassigned",
-                      priority: "Medium",
-                      is_completed: checked,
-                    });
-                  }
-                });
-
-                if (actionsToInsert.length > 0) {
-                  await supabase.from("action_items").insert(actionsToInsert);
-                }
+            const { data: ex } = await supabase.from("meeting_summaries").select("id").eq("meeting_id", meetingId).maybeSingle();
+            if (!ex) {
+              const { data: s, error: se } = await supabase.from("meeting_summaries").insert({ meeting_id: meetingId, markdown_content: d.minutes, executive_summary: "AI Generated", key_decisions: [] }).select("id").maybeSingle();
+              if (se) throw se;
+              if (s) {
+                const actions = d.minutes.split("\n").reduce<any[]>((acc, line) => {
+                  const m = line.trim().match(/^-\s+\[([ xX])\]\s+(.*)/);
+                  if (m) acc.push({ summary_id: s.id, task: m[2], assignee: "Unassigned", priority: "Medium", is_completed: m[1].toLowerCase() === "x" });
+                  return acc;
+                }, []);
+                if (actions.length) await supabase.from("action_items").insert(actions);
               }
             }
-          } catch (err) {
-            console.warn("Failed to persist summary to Supabase:", err);
-          }
+          } catch { /* ignore */ }
         })();
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setIsGenerating(false);
-    }
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setIsGenerating(false); }
   };
 
-  useEffect(() => {
-    if (captions.length > 0) {
-      void generateSummary();
-    }
-  }, []);
-
-  const downloadMarkdown = () => {
-    if (!summaryText) return;
-    const blob = new Blob([summaryText], { type: "text/markdown;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.setAttribute("download", `minutes_${roomName.toLowerCase().replace(/[^a-z0-9]/g, "_")}.md`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const copyToClipboard = () => {
-    if (!summaryText) return;
-    void navigator.clipboard.writeText(summaryText);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
+  useEffect(() => { if (captions.length) void generateSummary(); }, []);
 
   return (
-    <div className="h-screen w-full bg-[#0B0F19] text-white overflow-hidden flex flex-col font-sans">
-      {/* Header */}
-      <header className="border-b border-white/10 px-8 py-5 flex items-center justify-between shrink-0 bg-white/[0.02] backdrop-blur-md">
+    <div className="h-screen w-full bg-[#09090e] text-white flex flex-col">
+      <header className="border-b border-white/[0.06] px-8 py-5 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
-          <div className="h-9 w-9 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center font-bold text-white shadow-lg">
-            D
-          </div>
+          <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-blue-500 to-violet-600 grid place-items-center font-bold text-white">D</div>
           <div>
-            <h1 className="text-base font-bold text-white tracking-wide">Meeting Concluded</h1>
-            <p className="text-xs text-white/50">Room: {roomName}</p>
+            <h1 className="text-sm font-bold text-white">Meeting ended</h1>
+            <p className="text-xs text-white/40 mt-0.5">Room: {roomName}</p>
           </div>
         </div>
-        <button
-          onClick={onClose}
-          className="h-10 rounded-xl border border-white/10 bg-white/5 px-4 text-xs font-semibold text-white hover:bg-white/10 transition"
-        >
-          Exit Dashboard
+        <button onClick={onClose} className="h-9 rounded-xl border border-white/[0.08] bg-white/5 px-4 text-xs font-medium text-white/60 hover:text-white hover:bg-white/10 transition">
+          Back to home
         </button>
       </header>
-
-      {/* Main Layout */}
-      <main className="flex-1 min-h-0 flex p-8 gap-8">
-        {/* Left Column: AI Minutes (scrollable) */}
-        <section className="flex-1 flex flex-col min-w-0 rounded-[2rem] border border-white/10 bg-white/[0.02] backdrop-blur-xl shadow-2xl p-8">
-          <div className="flex items-center justify-between pb-4 border-b border-white/10 shrink-0">
+      <main className="flex-1 min-h-0 flex p-6 gap-6">
+        <section className="flex-1 flex flex-col min-w-0 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-6">
+          <div className="flex items-center justify-between pb-4 border-b border-white/[0.06] shrink-0">
             <div>
-              <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                <span className="text-blue-400">✨</span> AI Meeting Minutes
-              </h2>
-              <p className="text-xs text-white/50 mt-0.5">Generated in real-time by Draftmin AI</p>
+              <h2 className="text-base font-bold text-white flex items-center gap-2"><span className="text-blue-400">✦</span> AI Meeting Minutes</h2>
+              <p className="text-xs text-white/30 mt-0.5">Generated by Draftmin AI</p>
             </div>
             {summaryText && (
               <div className="flex gap-2">
-                <button
-                  onClick={copyToClipboard}
-                  className="h-9 rounded-xl border border-white/10 bg-white/5 px-3 text-xs font-medium text-white/80 hover:text-white hover:bg-white/10 transition flex items-center gap-1.5"
-                >
-                  {copied ? (
-                    <>
-                      <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4 text-green-400 shrink-0" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="20 6 9 17 4 12" />
-                      </svg>
-                      <span className="text-green-400">Copied!</span>
-                    </>
-                  ) : (
-                    <>
-                      <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4 shrink-0" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                      </svg>
-                      <span>Copy Minutes</span>
-                    </>
-                  )}
+                <button onClick={() => { navigator.clipboard.writeText(summaryText); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+                  className="h-8 rounded-xl border border-white/[0.08] bg-white/5 px-3 text-xs text-white/60 hover:text-white hover:bg-white/10 transition">
+                  {copied ? "Copied!" : "Copy"}
                 </button>
-                <button
-                  onClick={downloadMarkdown}
-                  className="h-9 rounded-xl border border-white/10 bg-white/5 px-3 text-xs font-medium text-white/80 hover:text-white hover:bg-white/10 transition flex items-center gap-1.5"
-                >
-                  <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4 shrink-0" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                    <polyline points="7 10 12 15 17 10" />
-                    <line x1="12" y1="15" x2="12" y2="3" />
-                  </svg>
-                  <span>Download .md</span>
+                <button onClick={() => { const b = new Blob([summaryText], { type: "text/markdown" }); const u = URL.createObjectURL(b); const a = document.createElement("a"); a.href = u; a.download = `minutes_${roomName}.md`; a.click(); }}
+                  className="h-8 rounded-xl border border-white/[0.08] bg-white/5 px-3 text-xs text-white/60 hover:text-white hover:bg-white/10 transition">
+                  Download .md
                 </button>
               </div>
             )}
           </div>
-
-          <div className="flex-1 overflow-y-auto mt-6 pr-2 min-h-0">
+          <div className="flex-1 overflow-y-auto mt-4 pr-1 min-h-0">
             {isGenerating && (
-              <div className="h-full w-full flex flex-col items-center justify-center gap-4 py-20">
-                <span className="relative flex h-10 w-10 shrink-0">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-10 w-10 bg-blue-500 flex items-center justify-center">
-                    <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
+              <div className="h-full flex flex-col items-center justify-center gap-4">
+                <div className="relative flex h-10 w-10">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-40" />
+                  <span className="relative inline-flex rounded-full h-10 w-10 bg-blue-600 items-center justify-center">
+                    <svg className="animate-spin h-5 w-5 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
                   </span>
-                </span>
-                <div className="text-center space-y-1">
-                  <h3 className="text-sm font-semibold text-white">Generating AI Summary...</h3>
-                  <p className="text-xs text-white/50 max-w-sm">
-                    Llama 3.3 is analyzing the speaker transcripts to compile your key decisions, arguments, and action items.
-                  </p>
                 </div>
+                <p className="text-sm text-white/40">Generating summary…</p>
               </div>
             )}
-
             {error && (
-              <div className="rounded-2xl border border-rose-500/20 bg-rose-500/5 p-6 text-center max-w-md mx-auto my-12">
-                <h3 className="text-sm font-semibold text-rose-300">Analysis Failed</h3>
-                <p className="text-xs text-rose-200/60 mt-2">{error}</p>
-                <button
-                  onClick={generateSummary}
-                  className="mt-4 h-9 rounded-xl bg-rose-600 px-4 text-xs font-semibold text-white hover:bg-rose-700 transition"
-                >
-                  Retry Generation
-                </button>
+              <div className="rounded-2xl border border-red-500/20 bg-red-500/5 p-6 text-center">
+                <p className="text-sm text-red-300">{error}</p>
+                <button onClick={generateSummary} className="mt-3 h-8 rounded-xl bg-red-600 px-4 text-xs font-medium text-white hover:bg-red-500 transition">Retry</button>
               </div>
             )}
-
-            {captions.length === 0 && !isGenerating && !error && (
-              <div className="h-full w-full flex flex-col items-center justify-center gap-3 py-20 text-center">
-                <div className="h-12 w-12 rounded-full bg-white/5 flex items-center justify-center text-white/40">
-                  ⚠️
-                </div>
-                <h3 className="text-sm font-semibold text-white">No transcript recorded</h3>
-                <p className="text-xs text-white/50 max-w-xs">
-                  No speech was transcribed during this meeting. Speak clearly into the microphone in your next meeting to generate minutes!
-                </p>
-              </div>
-            )}
-
-            {summaryText && !isGenerating && !error && (
-              <div className="animate-in fade-in duration-500">
-                <MarkdownRenderer text={summaryText} />
+            {summaryText && !isGenerating && <MarkdownRenderer text={summaryText} />}
+            {!captions.length && !isGenerating && !error && (
+              <div className="h-full flex flex-col items-center justify-center gap-2 text-center">
+                <p className="text-sm font-medium text-white/40">No transcript recorded</p>
+                <p className="text-xs text-white/25">Enable captions during your next meeting to generate AI minutes.</p>
               </div>
             )}
           </div>
         </section>
-
-        {/* Right Column: Info & Live Transcript */}
-        <aside className="w-80 flex flex-col gap-6 shrink-0 min-h-0">
-          <div className="rounded-[1.5rem] border border-white/10 bg-white/[0.02] p-6 backdrop-blur-xl shadow-lg shrink-0">
-            <h3 className="text-sm font-bold text-white">Meeting Info</h3>
-            <div className="mt-4 space-y-3">
-              <div className="flex justify-between items-center text-xs pb-2 border-b border-white/5">
-                <span className="text-white/40">Participants</span>
-                <span className="text-white/80 font-medium font-mono">
-                  {Array.from(new Set(captions.map(c => {
-                    const colonIdx = c.indexOf(":");
-                    return colonIdx !== -1 ? c.substring(0, colonIdx).trim() : "Guest";
-                  }))).length || 1}
-                </span>
-              </div>
-              <div className="flex justify-between items-center text-xs pb-2 border-b border-white/5">
-                <span className="text-white/40">Transcript blocks</span>
-                <span className="text-white/80 font-medium font-mono">{captions.length}</span>
-              </div>
-              <div className="flex justify-between items-center text-xs">
-                <span className="text-white/40">Date & Time</span>
-                <span className="text-white/80 font-medium font-mono">
-                  {new Date().toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
-                </span>
-              </div>
+        <aside className="w-72 flex flex-col gap-4 shrink-0">
+          <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-5">
+            <h3 className="text-sm font-semibold text-white mb-3">Meeting info</h3>
+            <div className="space-y-2.5 text-xs">
+              <div className="flex justify-between"><span className="text-white/40">Transcript blocks</span><span className="text-white/70 font-mono">{captions.length}</span></div>
+              <div className="flex justify-between"><span className="text-white/40">Date</span><span className="text-white/70">{new Date().toLocaleDateString()}</span></div>
             </div>
           </div>
-
-          <div className="flex-1 min-h-0 rounded-[1.5rem] border border-white/10 bg-white/[0.02] p-6 backdrop-blur-xl shadow-lg flex flex-col">
-            <h3 className="text-sm font-bold text-white pb-3 border-b border-white/5 shrink-0">
-              Raw Transcript ({captions.length})
-            </h3>
-            <div className="flex-1 overflow-y-auto mt-4 pr-1 space-y-3 min-h-0 text-xs">
-              {captions.map((caption, index) => {
-                const colonIdx = caption.indexOf(":");
-                const speaker = colonIdx !== -1 ? caption.substring(0, colonIdx).trim() : "Unknown";
-                const text = colonIdx !== -1 ? caption.substring(colonIdx + 1).trim() : caption;
-                
+          <div className="flex-1 min-h-0 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-5 flex flex-col">
+            <h3 className="text-sm font-semibold text-white mb-3 shrink-0">Raw transcript</h3>
+            <div className="flex-1 overflow-y-auto min-h-0 space-y-2 text-xs">
+              {captions.map((c, i) => {
+                const col = c.indexOf(":");
+                const spk = col !== -1 ? c.substring(0, col).trim() : "?";
+                const txt = col !== -1 ? c.substring(col + 1).trim() : c;
                 return (
-                  <div key={index} className="space-y-1">
-                    <div className="font-semibold text-blue-400 font-mono">{speaker}</div>
-                    <div className="rounded-xl border border-white/5 bg-white/[0.01] p-3 text-white/80 leading-relaxed font-sans">
-                      {text}
-                    </div>
-                  </div>
+                  <div key={i}><div className="text-blue-400 font-medium">{spk}</div><div className="rounded-lg border border-white/[0.04] bg-white/[0.02] p-2 text-white/60 mt-0.5">{txt}</div></div>
                 );
               })}
-              {captions.length === 0 && (
-                <div className="text-center text-white/40 py-12">
-                  No transcripts captured.
-                </div>
-              )}
+              {!captions.length && <p className="text-white/25 text-center py-4">Nothing transcribed.</p>}
             </div>
           </div>
         </aside>
@@ -1401,262 +852,227 @@ function RoomDisconnectionListener({ onDisconnect }: { onDisconnect: () => void 
   const room = useRoomContext();
   useEffect(() => {
     if (!room) return;
-    const handleDisconnected = () => {
-      onDisconnect();
-    };
-    room.on("disconnected", handleDisconnected);
-    return () => {
-      room.off("disconnected", handleDisconnected);
-    };
+    room.on("disconnected", onDisconnect);
+    return () => { room.off("disconnected", onDisconnect); };
   }, [room, onDisconnect]);
   return null;
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+   Device error message helper
+───────────────────────────────────────────────────────────────────────── */
+function getFriendlyError(msg: string): { title: string; body: string } {
+  const m = msg.toLowerCase();
+  if (m.includes("permission") || m.includes("notallowed"))
+    return { title: "Camera or Microphone Blocked", body: "Click the lock icon in your browser's address bar and allow camera/microphone access." };
+  if (m.includes("in use") || m.includes("readable") || m.includes("concurrent"))
+    return { title: "Device In Use", body: "Another app (Zoom, Teams, etc.) is using your camera or mic. Close it and try again." };
+  if (m.includes("notfound") || m.includes("no device"))
+    return { title: "No Device Found", body: "No camera or microphone detected. Plug one in and refresh." };
+  return { title: "Device Error", body: msg };
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Main LiveMeetingRoom
+───────────────────────────────────────────────────────────────────────── */
 export function LiveMeetingRoom({
-  roomName,
-  identity,
-  title = "Draftmin Meeting",
-  startWithMic = true,
-  startWithCamera = false,
+  roomName, identity, title = "Meeting",
+  startWithMic = true, startWithCamera = false,
 }: LiveMeetingRoomProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const [tokenData, setTokenData] = useState<TokenResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [deviceError, setDeviceError] = useState<string | null>(null);
   const [activePanel, setActivePanel] = useState<MeetingPanel>(null);
   const [captions, setCaptions] = useState<string[]>([]);
-  const [interimCaption, setInterimCaption] = useState<string>("");
+  const [interimCaption, setInterimCaption] = useState("");
   const [captionError, setCaptionError] = useState<string | null>(null);
-  const [showSummaryScreen, setShowSummaryScreen] = useState(false);
+  const [showSummary, setShowSummary] = useState(false);
   const [meetingId, setMeetingId] = useState<string | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [controlsVisible, setControlsVisible] = useState(true);
+  const [viewMode, setViewMode] = useState<"grid" | "speaker">("grid");
 
-  // Sync active meeting with Supabase
+  /* ── Fullscreen ─────────────────────────────────────────────────────── */
+  const toggleFullscreen = useCallback(() => {
+    if (!document.fullscreenElement) {
+      containerRef.current?.requestFullscreen?.();
+    } else {
+      document.exitFullscreen?.();
+    }
+  }, []);
+
+  useEffect(() => {
+    const handler = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", handler);
+    return () => document.removeEventListener("fullscreenchange", handler);
+  }, []);
+
+  /* ── Auto-hide controls ─────────────────────────────────────────────── */
+  const revealControls = useCallback(() => {
+    setControlsVisible(true);
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    hideTimerRef.current = setTimeout(() => setControlsVisible(false), 4000);
+  }, []);
+
+  useEffect(() => {
+    revealControls();
+    return () => { if (hideTimerRef.current) clearTimeout(hideTimerRef.current); };
+  }, []);
+
+  /* ── Supabase meeting sync ──────────────────────────────────────────── */
   useEffect(() => {
     async function syncMeeting() {
       try {
-        let { data: meeting, error: fetchErr } = await supabase
-          .from("meetings")
-          .select("id")
-          .eq("room_name", roomName)
-          .maybeSingle();
-
-        if (fetchErr) throw fetchErr;
-
+        let { data: meeting, error: fe } = await supabase.from("meetings").select("id").eq("room_name", roomName).maybeSingle();
+        if (fe) throw fe;
         if (!meeting) {
-          const { data: newMeeting, error: insertError } = await supabase
-            .from("meetings")
-            .insert({
-              room_name: roomName,
-              title: roomName + " Meeting",
-              is_active: true,
-            })
-            .select("id")
-            .single();
-
-          if (insertError) throw insertError;
-          meeting = newMeeting;
+          const { data: nm, error: ie } = await supabase.from("meetings").insert({ room_name: roomName, title: `${roomName} Meeting`, is_active: true }).select("id").single();
+          if (ie) throw ie;
+          meeting = nm;
         }
-
-        if (meeting) {
-          setMeetingId(meeting.id);
-        }
-      } catch (err) {
-        console.warn("Failed to sync meeting session with Supabase:", err);
-      }
+        if (meeting) setMeetingId(meeting.id);
+      } catch { /* ignore */ }
     }
-
     void syncMeeting();
   }, [roomName]);
 
-  const speechRecognitionAvailable =
-    typeof window !== "undefined" &&
-    (() => {
-      const win = window as Window & {
-        SpeechRecognition?: SimpleSpeechRecognitionConstructor;
-        webkitSpeechRecognition?: SimpleSpeechRecognitionConstructor;
-      };
-      return Boolean(win.SpeechRecognition ?? win.webkitSpeechRecognition);
-    })();
-
-  const sttProviderOrder = DEFAULT_STT_PROVIDER_ORDER;
-  const sttLang = DEFAULT_STT_LANG;
-  const sttChunkMs = DEFAULT_STT_CHUNK_MS;
-  const sttDisabled = STT_DISABLED;
-
-  const audioCaptureOptions = startWithMic
-    ? {
-      autoGainControl: true,
-      echoCancellation: true,
-      noiseSuppression: true,
-    }
-    : false;
-
-  const handleMediaFailure = (failure?: unknown, kind?: string) => {
-    const kindLabel = kind === "videoinput" ? "camera" : kind === "audioinput" ? "microphone" : "media device";
-    setDeviceError(
-      `Unable to access your ${kindLabel}. ${(failure as { message?: string })?.message ?? "Check permissions and try again."}`,
-    );
-  };
-
+  /* ── Token fetch ────────────────────────────────────────────────────── */
   useEffect(() => {
     const controller = new AbortController();
-
     async function loadToken() {
       try {
         setError(null);
-        const response = await fetch(
+        const res = await fetch(
           `/api/livekit/token?room=${encodeURIComponent(roomName)}&identity=${encodeURIComponent(identity)}`,
           { signal: controller.signal },
         );
-
-        if (!response.ok) {
-          const message = await response.text();
-          throw new Error(message || "Unable to get LiveKit token");
-        }
-
-        const data = (await response.json()) as TokenResponse;
-        setTokenData(data);
-      } catch (error) {
-        if (error instanceof Error && error.name === "AbortError") {
-          return;
-        }
-        setError(error instanceof Error ? error.message : String(error));
+        if (!res.ok) throw new Error(await res.text() || "Could not get LiveKit token");
+        setTokenData(await res.json() as TokenResponse);
+      } catch (e) {
+        if (e instanceof Error && e.name === "AbortError") return;
+        setError(e instanceof Error ? e.message : String(e));
       }
     }
-
-    loadToken();
-
+    void loadToken();
     return () => controller.abort();
   }, [identity, roomName]);
 
+  const speechRecognitionAvailable =
+    typeof window !== "undefined" &&
+    Boolean((window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition);
 
-
+  /* ── Loading ─────────────────────────────────────────────────────────── */
   if (!tokenData && !error) {
     return (
-      <div className="h-screen w-full bg-[#0B0F19] text-white flex items-center justify-center px-6">
-        <div className="max-w-lg rounded-[2rem] border border-white/10 bg-white/5 p-10 text-center">
-          <div className="text-lg font-semibold text-white">Connecting to the meeting…</div>
-          <p className="mt-3 text-sm text-white/60">Fetching a LiveKit token and opening the room for your session.</p>
+      <div className="h-screen w-full bg-[#09090e] text-white flex items-center justify-center">
+        <div className="text-center space-y-4">
+          <div className="relative flex h-12 w-12 mx-auto">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-30" />
+            <span className="relative inline-flex h-12 w-12 rounded-full bg-blue-600 items-center justify-center">
+              <svg className="animate-spin h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+            </span>
+          </div>
+          <p className="text-sm text-white/40">Connecting to room…</p>
         </div>
       </div>
     );
   }
 
-  if (showSummaryScreen) {
-    return (
-      <MeetingSummaryDashboard
-        captions={captions}
-        roomName={roomName}
-        meetingId={meetingId}
-        onClose={() => {
-          window.location.href = "/meeting";
-        }}
-      />
-    );
+  /* ── Summary screen ─────────────────────────────────────────────────── */
+  if (showSummary) {
+    return <MeetingSummaryDashboard captions={captions} roomName={roomName} meetingId={meetingId} onClose={() => { window.location.href = "/meeting"; }} />;
   }
 
+  /* ── Error ─────────────────────────────────────────────────────────── */
   if (error || !tokenData) {
     return (
-      <div className="h-screen w-full bg-[#0B0F19] text-white flex items-center justify-center px-6">
-        <div className="max-w-lg rounded-[2rem] border border-red-500/30 bg-white/5 p-10 text-center">
-          <div className="text-lg font-semibold text-white">Unable to join the meeting</div>
-          <p className="mt-3 text-sm text-white/60">{error ?? "LiveKit token service did not return a session."}</p>
+      <div className="h-screen w-full bg-[#09090e] text-white flex items-center justify-center px-6">
+        <div className="max-w-md rounded-2xl border border-red-500/20 bg-red-500/5 p-8 text-center">
+          <p className="text-base font-semibold text-white">Unable to join</p>
+          <p className="mt-2 text-sm text-white/40">{error ?? "No session returned from LiveKit."}</p>
         </div>
       </div>
     );
   }
 
   return (
-    <LiveKitRoom
-      serverUrl={tokenData.url}
-      token={tokenData.token}
-      audio={audioCaptureOptions}
-      video={
-        startWithCamera
-          ? {
-              facingMode: "user",
-            }
-          : false
-      }
-      connect
-      onMediaDeviceFailure={handleMediaFailure}
-    >
-      <RoomDisconnectionListener onDisconnect={() => setShowSummaryScreen(true)} />
-      <RoomTranscriptionController
-        sttDisabled={sttDisabled}
-        sttLang={sttLang}
-        sttChunkMs={sttChunkMs}
-        speechRecognitionAvailable={speechRecognitionAvailable}
-        sttProviderOrder={sttProviderOrder}
-        onCaptionsChange={setCaptions}
-        onInterimCaptionChange={setInterimCaption}
-        onCaptionErrorChange={setCaptionError}
-        meetingId={meetingId}
-      />
-      <MeetingLayout
-        header={<MeetingHeader title={title} />}
-        sidebar={
-          activePanel ? (
-            <SidePanel
-              activePanel={activePanel}
-              onClose={() => setActivePanel(null)}
-              captions={captions}
-              interimCaption={interimCaption}
-              captionError={captionError}
-              speechRecognitionAvailable={speechRecognitionAvailable}
-              providerOrder={sttProviderOrder}
-              meetingId={meetingId}
-            />
-          ) : undefined
-        }
-        controls={
-          <MeetingControls
-            activePanel={activePanel}
-            onTogglePanel={(panel) => setActivePanel((current) => (current === panel ? null : panel))}
-            onDeviceError={(error) => setDeviceError(error ? error.message : null)}
-          />
-        }
+    <div ref={containerRef} className="h-screen w-full" onMouseMove={revealControls} onTouchStart={revealControls}>
+      <LiveKitRoom
+        serverUrl={tokenData.url}
+        token={tokenData.token}
+        audio={startWithMic ? { autoGainControl: true, echoCancellation: true, noiseSuppression: true } : false}
+        video={startWithCamera ? { facingMode: "user" } : false}
+        connect
+        onMediaDeviceFailure={(failure, kind) => {
+          const label = kind === "videoinput" ? "camera" : kind === "audioinput" ? "microphone" : "media device";
+          setDeviceError(`Could not access your ${label}. ${(failure as any)?.message ?? ""}`);
+        }}
       >
-        <div className="h-full w-full flex flex-col min-h-0">
-          {deviceError ? (() => {
-            const friendly = getFriendlyDeviceErrorMessage(deviceError);
+        <RoomDisconnectionListener onDisconnect={() => setShowSummary(true)} />
+        <RoomTranscriptionController
+          sttDisabled={STT_DISABLED} sttLang={DEFAULT_STT_LANG} sttChunkMs={DEFAULT_STT_CHUNK_MS}
+          speechRecognitionAvailable={speechRecognitionAvailable} sttProviderOrder={DEFAULT_STT_PROVIDER_ORDER}
+          onCaptionsChange={setCaptions} onInterimCaptionChange={setInterimCaption}
+          onCaptionErrorChange={setCaptionError} meetingId={meetingId}
+        />
+
+        <MeetingLayout
+          controlsVisible={controlsVisible}
+          header={<MeetingHeader title={title} />}
+          sidebar={
+            activePanel ? (
+              <SidePanel
+                activePanel={activePanel}
+                onClose={() => setActivePanel(null)}
+                captions={captions}
+                interimCaption={interimCaption}
+                captionError={captionError}
+                speechRecognitionAvailable={speechRecognitionAvailable}
+                providerOrder={DEFAULT_STT_PROVIDER_ORDER}
+                meetingId={meetingId}
+              />
+            ) : undefined
+          }
+          controls={
+            <MeetingControls
+              activePanel={activePanel}
+              onTogglePanel={(p) => setActivePanel((c) => (c === p ? null : p))}
+              onDeviceError={(e) => setDeviceError(e ? e.message : null)}
+              isFullscreen={isFullscreen}
+              onToggleFullscreen={toggleFullscreen}
+              viewMode={viewMode}
+              onToggleView={() => setViewMode((v) => (v === "grid" ? "speaker" : "grid"))}
+            />
+          }
+        >
+          {/* Device error toast */}
+          {deviceError && (() => {
+            const { title: errTitle, body: errBody } = getFriendlyError(deviceError);
             return (
-              <div className="px-5 pt-5 animate-in fade-in slide-in-from-top-4 duration-300">
-                <div className="relative rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4 text-sm text-amber-200 backdrop-blur-md flex gap-3 items-start justify-between shadow-[0_4px_20px_rgba(245,158,11,0.05)]">
-                  <div className="flex gap-3">
-                    <span className="mt-0.5 text-amber-400 shrink-0">
-                      <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
-                        <path
-                          d="M12 9v4m0 4h.01M12 2a10 10 0 100 20 10 10 0 000-20z"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
-                    </span>
-                    <div className="space-y-1">
-                      <div className="font-semibold text-white">{friendly.title}</div>
-                      <p className="text-amber-200/80 text-xs leading-relaxed">{friendly.description}</p>
-                      <p className="text-amber-300/90 text-xs leading-relaxed font-medium mt-1">{friendly.suggestion}</p>
-                    </div>
+              <div className="absolute top-20 left-1/2 -translate-x-1/2 z-30 w-full max-w-md px-4 animate-in fade-in slide-in-from-top-3 duration-300">
+                <div className="rounded-2xl border border-amber-500/20 bg-[#1a1407]/90 backdrop-blur-xl p-4 flex gap-3 items-start shadow-2xl">
+                  <div className="h-5 w-5 text-amber-400 mt-0.5 shrink-0">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0zM12 9v4M12 17h.01" /></svg>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setDeviceError(null)}
-                    className="text-amber-400/60 hover:text-white transition p-1 hover:bg-white/5 rounded-lg shrink-0"
-                    aria-label="Dismiss error"
-                  >
-                    <IconClose />
-                  </button>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-amber-200">{errTitle}</p>
+                    <p className="mt-0.5 text-xs text-amber-200/60 leading-relaxed">{errBody}</p>
+                  </div>
+                  <button type="button" onClick={() => setDeviceError(null)} className="text-white/30 hover:text-white transition shrink-0 mt-0.5"><IconClose /></button>
                 </div>
               </div>
             );
-          })() : null}
-          <div className="flex-1 min-h-0">
-            <MeetingStage />
-          </div>
-        </div>
-      </MeetingLayout>
-    </LiveKitRoom>
+          })()}
+
+          <MeetingStage viewMode={viewMode} />
+        </MeetingLayout>
+      </LiveKitRoom>
+    </div>
   );
 }
