@@ -18,11 +18,11 @@ export default function Home() {
       <TestimonialsSection />
       <PricingSection />
       <CTASection />
-      
+
       {/* Footer */}
       <footer className="bg-white border-t border-slate-200 py-12">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mb-8">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-8 mb-8">
             <div>
               <h4 className="font-semibold text-slate-900 mb-4">Product</h4>
               <ul className="space-y-2 text-sm text-slate-600">
@@ -56,12 +56,12 @@ export default function Home() {
               </ul>
             </div>
           </div>
-          <div className="border-t border-slate-200 pt-8 flex justify-between items-center">
-            <p className="text-sm text-slate-600">&copy; 2026 Draftmin. All rights reserved.</p>
+          <div className="border-t border-slate-200 pt-8 flex flex-col sm:flex-row justify-between items-center gap-4">
+            <p className="text-sm text-slate-600 text-center sm:text-left">&copy; 2026 Draftmin. All rights reserved.</p>
             <div className="flex gap-4">
-              <a href="#" className="text-slate-600 hover:text-slate-900 transition">Twitter</a>
-              <a href="#" className="text-slate-600 hover:text-slate-900 transition">LinkedIn</a>
-              <a href="#" className="text-slate-600 hover:text-slate-900 transition">GitHub</a>
+              <a href="#" className="text-slate-600 hover:text-slate-900 transition text-sm">Twitter</a>
+              <a href="#" className="text-slate-600 hover:text-slate-900 transition text-sm">LinkedIn</a>
+              <a href="#" className="text-slate-600 hover:text-slate-900 transition text-sm">GitHub</a>
             </div>
           </div>
         </div>

@@ -15,7 +15,7 @@ type Props = {
   onToggleView?: () => void;
 };
 
-/* ── Icon components ──────────────────────────────────────────────────────── */
+/* ── Icons ────────────────────────────────────────────────────────────────── */
 function IconMic({ off }: { off: boolean }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" className="h-[18px] w-[18px]" aria-hidden="true">
@@ -109,13 +109,9 @@ function IconFullscreen({ active }: { active: boolean }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" className="h-[18px] w-[18px]" aria-hidden="true">
       {active ? (
-        <>
-          <path d="M8 3v3a2 2 0 01-2 2H3M21 8h-3a2 2 0 01-2-2V3M3 16h3a2 2 0 012 2v3M16 21v-3a2 2 0 012-2h3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-        </>
+        <path d="M8 3v3a2 2 0 01-2 2H3M21 8h-3a2 2 0 01-2-2V3M3 16h3a2 2 0 012 2v3M16 21v-3a2 2 0 012-2h3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
       ) : (
-        <>
-          <path d="M8 3H5a2 2 0 00-2 2v3M21 8V5a2 2 0 00-2-2h-3M3 16v3a2 2 0 002 2h3M16 21h3a2 2 0 002-2v-3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-        </>
+        <path d="M8 3H5a2 2 0 00-2 2v3M21 8V5a2 2 0 00-2-2h-3M3 16v3a2 2 0 002 2h3M16 21h3a2 2 0 002-2v-3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
       )}
     </svg>
   );
@@ -129,20 +125,16 @@ function IconEndCall() {
   );
 }
 
-/* ── Button sub-components ────────────────────────────────────────────────── */
-function MediaBtn({
-  label, danger, onClick, icon, disabled,
-}: {
-  label: string; danger?: boolean; onClick?: () => void; icon: ReactNode; disabled?: boolean;
-}) {
+/* ── Button components ────────────────────────────────────────────────────── */
+function MediaBtn({ label, danger, onClick, icon, disabled }: { label: string; danger?: boolean; onClick?: () => void; icon: ReactNode; disabled?: boolean }) {
   return (
-    <div className="flex flex-col items-center gap-1.5">
+    <div className="flex flex-col items-center gap-1 sm:gap-1.5">
       <button
         type="button"
         onClick={onClick}
         disabled={disabled}
         className={[
-          "h-12 w-12 rounded-full flex items-center justify-center transition-all active:scale-95 disabled:opacity-40",
+          "h-10 w-10 sm:h-12 sm:w-12 rounded-full flex items-center justify-center transition-all active:scale-95 disabled:opacity-40",
           danger
             ? "bg-red-500/20 border border-red-500/30 text-red-400 hover:bg-red-500/30"
             : "bg-white/10 border border-white/[0.08] text-white hover:bg-white/20",
@@ -150,23 +142,19 @@ function MediaBtn({
       >
         {icon}
       </button>
-      <span className="text-[10px] text-white/30 select-none">{label}</span>
+      <span className="text-[9px] sm:text-[10px] text-white/30 select-none hidden xs:block">{label}</span>
     </div>
   );
 }
 
-function PanelBtn({
-  label, active, onClick, icon,
-}: {
-  label: string; active?: boolean; onClick?: () => void; icon: ReactNode;
-}) {
+function PanelBtn({ label, active, onClick, icon }: { label: string; active?: boolean; onClick?: () => void; icon: ReactNode }) {
   return (
-    <div className="flex flex-col items-center gap-1.5">
+    <div className="flex flex-col items-center gap-1 sm:gap-1.5">
       <button
         type="button"
         onClick={onClick}
         className={[
-          "h-10 w-10 rounded-2xl flex items-center justify-center transition-all active:scale-95",
+          "h-9 w-9 sm:h-10 sm:w-10 rounded-xl sm:rounded-2xl flex items-center justify-center transition-all active:scale-95",
           active
             ? "bg-blue-500/20 border border-blue-500/30 text-blue-400"
             : "bg-white/5 border border-white/[0.06] text-white/50 hover:bg-white/10 hover:text-white",
@@ -174,31 +162,20 @@ function PanelBtn({
       >
         {icon}
       </button>
-      <span className={["text-[10px] select-none", active ? "text-blue-400/80" : "text-white/25"].join(" ")}>{label}</span>
+      <span className={["text-[9px] sm:text-[10px] select-none hidden xs:block", active ? "text-blue-400/80" : "text-white/25"].join(" ")}>{label}</span>
     </div>
   );
 }
 
 /* ── Main export ──────────────────────────────────────────────────────────── */
-export function MeetingControls({
-  activePanel,
-  onTogglePanel,
-  onDeviceError,
-  isFullscreen = false,
-  onToggleFullscreen,
-  viewMode = "grid",
-  onToggleView,
-}: Props) {
+export function MeetingControls({ activePanel, onTogglePanel, onDeviceError, isFullscreen = false, onToggleFullscreen, viewMode = "grid", onToggleView }: Props) {
   const room = useRoomContext();
   const { localParticipant, isMicrophoneEnabled, isCameraEnabled, isScreenShareEnabled } = useLocalParticipant();
   const [togglingMic, setTogglingMic] = useState(false);
   const [togglingCam, setTogglingCam] = useState(false);
   const [togglingScreen, setTogglingScreen] = useState(false);
 
-  const report = useCallback(
-    (e: unknown) => onDeviceError?.(e instanceof Error ? e : new Error(String(e))),
-    [onDeviceError],
-  );
+  const report = useCallback((e: unknown) => onDeviceError?.(e instanceof Error ? e : new Error(String(e))), [onDeviceError]);
 
   const toggleMic = useCallback(async () => {
     if (togglingMic) return;
@@ -222,72 +199,54 @@ export function MeetingControls({
   }, [isScreenShareEnabled, togglingScreen, report, localParticipant, onDeviceError]);
 
   return (
-    <div className="flex items-end gap-3 bg-[#14151c]/80 backdrop-blur-2xl border border-white/[0.08] rounded-2xl px-5 py-4 shadow-[0_8px_40px_rgba(0,0,0,0.6)]">
-      {/* Audio unlock (hidden until needed) */}
+    <div className="flex items-end gap-1.5 sm:gap-3 bg-[#14151c]/80 backdrop-blur-2xl border border-white/[0.08] rounded-2xl px-3 sm:px-5 py-3 sm:py-4 shadow-[0_8px_40px_rgba(0,0,0,0.6)] overflow-x-auto max-w-full">
+      {/* Audio unlock */}
       <StartAudio
         className="hidden h-8 rounded-xl border border-white/10 bg-white/5 px-3 text-xs text-white/40 hover:text-white transition"
         label="Unlock audio"
       />
 
       {/* Primary controls */}
-      <MediaBtn
-        label={togglingMic ? "…" : isMicrophoneEnabled ? "Mute" : "Unmute"}
-        danger={!isMicrophoneEnabled}
-        onClick={toggleMic}
-        disabled={togglingMic}
-        icon={<IconMic off={!isMicrophoneEnabled} />}
-      />
-      <MediaBtn
-        label={togglingCam ? "…" : isCameraEnabled ? "Stop video" : "Start video"}
-        danger={!isCameraEnabled}
-        onClick={toggleCam}
-        disabled={togglingCam}
-        icon={<IconCamera off={!isCameraEnabled} />}
-      />
-      <MediaBtn
-        label={isScreenShareEnabled ? "Stop share" : "Share screen"}
-        onClick={toggleScreen}
-        disabled={togglingScreen}
-        icon={<IconShare active={isScreenShareEnabled} />}
-      />
+      <MediaBtn label={togglingMic ? "…" : isMicrophoneEnabled ? "Mute" : "Unmute"} danger={!isMicrophoneEnabled} onClick={toggleMic} disabled={togglingMic} icon={<IconMic off={!isMicrophoneEnabled} />} />
+      <MediaBtn label={togglingCam ? "…" : isCameraEnabled ? "Stop video" : "Start video"} danger={!isCameraEnabled} onClick={toggleCam} disabled={togglingCam} icon={<IconCamera off={!isCameraEnabled} />} />
+      {/* Hide screen share on very small screens */}
+      <div className="hidden sm:block">
+        <MediaBtn label={isScreenShareEnabled ? "Stop share" : "Share screen"} onClick={toggleScreen} disabled={togglingScreen} icon={<IconShare active={isScreenShareEnabled} />} />
+      </div>
 
-      {/* Divider */}
-      <div className="w-px h-10 bg-white/[0.06] mx-1 self-center" />
+      <div className="w-px h-8 sm:h-10 bg-white/[0.06] mx-0.5 sm:mx-1 self-center shrink-0" />
 
       {/* Panel toggles */}
       <PanelBtn label="People" active={activePanel === "participants"} onClick={() => onTogglePanel?.("participants")} icon={<IconUsers />} />
       <PanelBtn label="Chat" active={activePanel === "chat"} onClick={() => onTogglePanel?.("chat")} icon={<IconChat />} />
-      <PanelBtn label="Captions" active={activePanel === "captions"} onClick={() => onTogglePanel?.("captions")} icon={<IconCaptions />} />
+      {/* Hide captions on small screens */}
+      <div className="hidden sm:block">
+        <PanelBtn label="Captions" active={activePanel === "captions"} onClick={() => onTogglePanel?.("captions")} icon={<IconCaptions />} />
+      </div>
 
-      {/* Divider */}
-      <div className="w-px h-10 bg-white/[0.06] mx-1 self-center" />
+      <div className="w-px h-8 sm:h-10 bg-white/[0.06] mx-0.5 sm:mx-1 self-center shrink-0 hidden sm:block" />
 
-      {/* View mode + fullscreen */}
-      <PanelBtn
-        label={viewMode === "grid" ? "Speaker" : "Grid"}
-        onClick={onToggleView}
-        icon={viewMode === "grid" ? <IconSpeaker /> : <IconGrid />}
-      />
-      <PanelBtn
-        label={isFullscreen ? "Exit full" : "Fullscreen"}
-        onClick={onToggleFullscreen}
-        icon={<IconFullscreen active={isFullscreen} />}
-      />
+      {/* View + fullscreen (desktop only) */}
+      <div className="hidden sm:block">
+        <PanelBtn label={viewMode === "grid" ? "Speaker" : "Grid"} onClick={onToggleView} icon={viewMode === "grid" ? <IconSpeaker /> : <IconGrid />} />
+      </div>
+      <div className="hidden sm:block">
+        <PanelBtn label={isFullscreen ? "Exit full" : "Fullscreen"} onClick={onToggleFullscreen} icon={<IconFullscreen active={isFullscreen} />} />
+      </div>
 
-      {/* Divider */}
-      <div className="w-px h-10 bg-white/[0.06] mx-1 self-center" />
+      <div className="w-px h-8 sm:h-10 bg-white/[0.06] mx-0.5 sm:mx-1 self-center shrink-0" />
 
       {/* End call */}
-      <div className="flex flex-col items-center gap-1.5">
+      <div className="flex flex-col items-center gap-1 sm:gap-1.5 shrink-0">
         <button
           type="button"
           onClick={() => room.disconnect(true)}
-          className="h-12 w-14 rounded-full bg-red-600 hover:bg-red-500 active:scale-95 transition flex items-center justify-center text-white shadow-[0_0_20px_rgba(239,68,68,0.3)]"
+          className="h-10 w-12 sm:h-12 sm:w-14 rounded-full bg-red-600 hover:bg-red-500 active:scale-95 transition flex items-center justify-center text-white shadow-[0_0_20px_rgba(239,68,68,0.3)]"
           aria-label="Leave meeting"
         >
           <IconEndCall />
         </button>
-        <span className="text-[10px] text-white/30 select-none">Leave</span>
+        <span className="text-[9px] sm:text-[10px] text-white/30 select-none hidden xs:block">Leave</span>
       </div>
     </div>
   );

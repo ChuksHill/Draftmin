@@ -188,7 +188,7 @@ export function PreJoinScreen({ roomName }: PreJoinScreenProps) {
               )}
 
               {/* Toggle controls */}
-              <div className="flex items-center gap-3 px-5 py-4 border-t border-white/5">
+              <div className="flex flex-wrap items-center gap-2 sm:gap-3 px-4 sm:px-5 py-4 border-t border-white/5">
                 {/* Mic toggle */}
                 <button
                   type="button"

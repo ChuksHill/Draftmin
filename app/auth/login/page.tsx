@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { useState, FormEvent, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -24,20 +24,15 @@ function Divider() {
         <div className="w-full border-t border-slate-200" />
       </div>
       <div className="relative flex justify-center">
-        <span className="bg-[#F6F8FC] px-3 text-xs text-slate-400 font-medium">
-          or continue with email
-        </span>
+        <span className="bg-[#F6F8FC] px-3 text-xs text-slate-400 font-medium">or continue with email</span>
       </div>
     </div>
   );
 }
 
-/* ---------------- LOGIN CONTENT (uses useSearchParams) ---------------- */
-
 function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-
   const redirect = searchParams.get('redirect') ?? '/meeting';
 
   const [email, setEmail] = useState('');
@@ -64,30 +59,15 @@ function LoginContent() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
-
-    if (!email.trim()) {
-      setError('Please enter your email address.');
-      return;
-    }
-    if (!password) {
-      setError('Please enter your password.');
-      return;
-    }
-
+    if (!email.trim()) { setError('Please enter your email address.'); return; }
+    if (!password) { setError('Please enter your password.'); return; }
     setLoading(true);
-
     try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
-      });
-
+      const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
       if (error) throw error;
-
       router.replace(redirect);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Sign in failed.';
-
       if (msg.toLowerCase().includes('invalid login credentials')) {
         setError('Incorrect email or password. Please try again.');
       } else if (msg.toLowerCase().includes('email not confirmed')) {
@@ -103,12 +83,8 @@ function LoginContent() {
   return (
     <AuthSidebar>
       <div>
-        <h1 className="text-3xl font-bold text-slate-900 tracking-tight">
-          Welcome back
-        </h1>
-        <p className="mt-2 text-sm text-slate-500">
-          Sign in to your Draftmin account to continue.
-        </p>
+        <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Welcome back</h1>
+        <p className="mt-2 text-sm text-slate-500">Sign in to your Draftmin account to continue.</p>
 
         <button
           type="button"
@@ -127,10 +103,7 @@ function LoginContent() {
         <Divider />
 
         {error && (
-          <div
-            role="alert"
-            className="mb-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 flex items-start gap-2"
-          >
+          <div role="alert" className="mb-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 flex items-start gap-2">
             {error}
           </div>
         )}
@@ -141,34 +114,41 @@ function LoginContent() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="you@example.com"
+            autoComplete="email"
             disabled={loading || googleLoading}
-            className="h-12 w-full rounded-2xl border border-slate-200 px-4 text-sm"
+            className="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm outline-none focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100 transition disabled:opacity-60"
           />
-
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="••••••••"
-            disabled={loading || googleLoading}
-            className="h-12 w-full rounded-2xl border border-slate-200 px-4 text-sm"
-          />
-
+          <div className="space-y-1">
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+            autoComplete="current-password"
+              disabled={loading || googleLoading}
+              className="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm outline-none focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100 transition disabled:opacity-60"
+            />
+            <div className="flex justify-end">
+              <a href="#" className="text-xs text-blue-600 hover:underline">Forgot password?</a>
+            </div>
+          </div>
           <button
             type="submit"
             disabled={loading || googleLoading}
-            className="h-12 w-full rounded-2xl bg-blue-600 text-white font-semibold"
+            className="h-12 w-full rounded-2xl bg-blue-600 text-white font-semibold text-sm hover:bg-blue-700 transition disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            {loading ? 'Signing in...' : 'Sign in'}
+            {loading ? (
+              <span className="flex items-center justify-center gap-2">
+                <span className="h-4 w-4 rounded-full border-2 border-white/40 border-t-white animate-spin" />
+                Signing in…
+              </span>
+            ) : 'Sign in'}
           </button>
         </form>
 
         <p className="mt-6 text-center text-sm text-slate-500">
           Don&apos;t have an account?{' '}
-          <Link
-            href="/auth/signup"
-            className="font-semibold text-blue-600"
-          >
+          <Link href="/auth/signup" className="font-semibold text-blue-600 hover:underline">
             Sign up free
           </Link>
         </p>
@@ -176,8 +156,6 @@ function LoginContent() {
     </AuthSidebar>
   );
 }
-
-/* ---------------- PAGE WRAPPER (Suspense fix) ---------------- */
 
 export default function LoginPage() {
   return (

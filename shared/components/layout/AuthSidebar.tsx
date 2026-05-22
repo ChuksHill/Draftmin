@@ -12,7 +12,7 @@ export function AuthSidebar({ children }: AuthSidebarProps) {
     <div className="min-h-screen flex">
       {/* ── Left panel: dark navy with orb ─────────────────────────────── */}
       <div
-        className="hidden lg:flex lg:w-[52%] flex-col relative overflow-hidden"
+        className="hidden md:flex md:w-[52%] flex-col relative overflow-hidden"
         style={{
           background: 'linear-gradient(135deg, #060B18 0%, #0B1530 50%, #0A1628 100%)',
         }}
@@ -90,7 +90,7 @@ export function AuthSidebar({ children }: AuthSidebarProps) {
       {/* ── Right panel: form ───────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col items-center justify-center bg-[#F6F8FC] px-6 py-12">
         {/* Mobile logo */}
-        <div className="lg:hidden mb-10 flex items-center gap-2">
+        <div className="md:hidden mb-10 flex items-center gap-2">
           <Link href="/" className="inline-flex items-center gap-2">
             <div className="w-9 h-9 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center">
               <span className="font-bold text-white text-lg">D</span>

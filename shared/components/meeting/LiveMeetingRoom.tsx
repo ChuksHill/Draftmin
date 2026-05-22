@@ -1024,6 +1024,7 @@ export function LiveMeetingRoom({
 
         <MeetingLayout
           controlsVisible={controlsVisible}
+          onCloseSidebar={() => setActivePanel(null)}
           header={<MeetingHeader title={title} />}
           sidebar={
             activePanel ? (

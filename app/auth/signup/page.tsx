@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { useState, FormEvent, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -32,12 +32,9 @@ function Divider() {
   );
 }
 
-/* ---------------- INNER COMPONENT ---------------- */
-
 function SignupContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-
   const redirect = searchParams.get('redirect') ?? '/meeting';
 
   const [email, setEmail] = useState('');
@@ -51,13 +48,11 @@ function SignupContent() {
   async function handleGoogle() {
     setError(null);
     setGoogleLoading(true);
-
     try {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: { redirectTo: `${window.location.origin}${redirect}` },
       });
-
       if (error) throw error;
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Google sign-up failed. Please try again.');
@@ -67,42 +62,25 @@ function SignupContent() {
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-
     setError(null);
     setSuccess(null);
 
-    if (!email.trim()) {
-      setError('Please enter your email address.');
-      return;
-    }
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters.');
-      return;
-    }
-    if (password !== confirm) {
-      setError('Passwords do not match.');
-      return;
-    }
+    if (!email.trim()) { setError('Please enter your email address.'); return; }
+    if (password.length < 8) { setError('Password must be at least 8 characters.'); return; }
+    if (password !== confirm) { setError('Passwords do not match.'); return; }
 
     setLoading(true);
-
     try {
       const { error } = await supabase.auth.signUp({
         email: email.trim(),
         password,
         options: { emailRedirectTo: `${window.location.origin}${redirect}` },
       });
-
       if (error) throw error;
-
       setSuccess('Check your email for a confirmation link to activate your account.');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Sign up failed.';
-
-      if (
-        msg.toLowerCase().includes('already registered') ||
-        msg.toLowerCase().includes('user already exists')
-      ) {
+      if (msg.toLowerCase().includes('already registered') || msg.toLowerCase().includes('user already exists')) {
         setError('An account with this email already exists. Try signing in instead.');
       } else {
         setError(msg);
@@ -115,12 +93,8 @@ function SignupContent() {
   return (
     <AuthSidebar>
       <div>
-        <h1 className="text-3xl font-bold text-slate-900 tracking-tight">
-          Create your account
-        </h1>
-        <p className="mt-2 text-sm text-slate-500">
-          Get started with Draftmin — it&apos;s free.
-        </p>
+        <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Create your account</h1>
+        <p className="mt-2 text-sm text-slate-500">Get started with Draftmin — it&apos;s free.</p>
 
         <button
           type="button"
@@ -138,43 +112,64 @@ function SignupContent() {
 
         <Divider />
 
-        {error && <div className="text-red-600">{error}</div>}
-        {success && <div className="text-green-600">{success}</div>}
+        {error && (
+          <div role="alert" className="mb-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 flex items-start gap-2">
+            {error}
+          </div>
+        )}
+        {success && (
+          <div role="status" className="mb-5 rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700 flex items-start gap-2">
+            {success}
+          </div>
+        )}
 
         {!success && (
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} noValidate className="space-y-4">
             <input
+              type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="Email"
-              className="h-12 w-full border rounded-2xl px-4"
+              placeholder="you@example.com"
+              autoComplete="email"
+              disabled={loading || googleLoading}
+              className="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm outline-none focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100 transition disabled:opacity-60"
             />
-
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Password"
-              className="h-12 w-full border rounded-2xl px-4"
+              placeholder="Password (min 8 characters)"
+              autoComplete="new-password"
+              disabled={loading || googleLoading}
+              className="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm outline-none focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100 transition disabled:opacity-60"
             />
-
             <input
               type="password"
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
               placeholder="Confirm password"
-              className="h-12 w-full border rounded-2xl px-4"
+              autoComplete="new-password"
+              disabled={loading || googleLoading}
+              className="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm outline-none focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100 transition disabled:opacity-60"
             />
-
-            <button className="h-12 w-full bg-blue-600 text-white rounded-2xl">
-              Create account
+            <button
+              type="submit"
+              disabled={loading || googleLoading}
+              className="h-12 w-full rounded-2xl bg-blue-600 text-white font-semibold text-sm hover:bg-blue-700 transition disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {loading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="h-4 w-4 rounded-full border-2 border-white/40 border-t-white animate-spin" />
+                  Creating account…
+                </span>
+              ) : 'Create account'}
             </button>
           </form>
         )}
 
         <p className="mt-6 text-center text-sm text-slate-500">
           Already have an account?{' '}
-          <Link href="/auth/login" className="text-blue-600 font-semibold">
+          <Link href="/auth/login" className="text-blue-600 font-semibold hover:underline">
             Sign in
           </Link>
         </p>
@@ -182,8 +177,6 @@ function SignupContent() {
     </AuthSidebar>
   );
 }
-
-/* ---------------- PAGE WRAPPER ---------------- */
 
 export default function SignupPage() {
   return (

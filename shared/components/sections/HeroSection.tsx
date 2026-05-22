@@ -10,7 +10,7 @@ function StatCard({ value, label, delay }: { value: string; label: string; delay
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay, duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-      className="flex flex-col items-center rounded-2xl px-6 py-4"
+      className="flex flex-col items-center rounded-2xl px-3 sm:px-6 py-3 sm:py-4"
       style={{
         background: 'rgba(255,255,255,0.06)',
         border: '1px solid rgba(255,255,255,0.1)',
@@ -110,7 +110,7 @@ export function HeroSection() {
               variants={{ hidden: { opacity: 0, y: 16 }, show: { opacity: 1, y: 0, transition: { duration: 0.7, ease } } }}
               className="space-y-3"
             >
-              <h1 className="text-5xl sm:text-6xl lg:text-[70px] font-bold text-white tracking-tight leading-[1.05]">
+              <h1 className="text-4xl sm:text-5xl lg:text-[70px] font-bold text-white tracking-tight leading-[1.05]">
                 Meetings that feel
               </h1>
               <h1
@@ -196,7 +196,7 @@ export function HeroSection() {
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.6, duration: 0.7, ease }}
-          className="mt-20 grid grid-cols-3 gap-4 max-w-lg"
+          className="mt-16 sm:mt-20 grid grid-cols-3 gap-2 sm:gap-4 w-full max-w-lg"
         >
           <StatCard value="< 2s"  label="Room start time" delay={0.65} />
           <StatCard value="99.9%" label="Uptime SLA"       delay={0.72} />
