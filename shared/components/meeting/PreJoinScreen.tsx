@@ -80,7 +80,7 @@ export function PreJoinScreen({ roomName }: PreJoinScreenProps) {
         setStream(next);
         if (videoRef.current) {
           videoRef.current.srcObject = next;
-          await videoRef.current.play().catch(() => {});
+          await videoRef.current.play().catch(() => { });
         }
       } catch (e) {
         setDeviceError(e instanceof Error ? e.message : String(e));

@@ -16,7 +16,7 @@ import { RoomEvent, Track } from "livekit-client";
 import { MeetingLayout } from "@/shared/components/layout/meeting-layout/MeetingLayout";
 import { MeetingHeader } from "@/shared/components/layout/meeting-layout/MeetingHeader";
 import { MeetingControls, MeetingPanel } from "@/shared/components/layout/meeting-layout/MeetingControls";
-import { createAudioPreprocessor, isSpeechPresent } from "@/shared/lib/audio/audioPreprocessor";
+import { createAudioPreprocessor, getAudioRMS, isSpeechPresent } from "@/shared/lib/audio/audioPreprocessor";
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 type SttProvider = "deepgram" | "whisper" | "webspeech";
@@ -545,7 +545,7 @@ type STTProps = {
   meetingId: string | null;
 };
 
-function RoomTranscriptionController({ sttDisabled, sttLang, sttChunkMs, speechRecognitionAvailable, sttProviderOrder, onCaptionsChange, onInterimChange, onErrorChange, meetingId }: STTProps) {
+  function RoomTranscriptionController({ sttDisabled, sttLang, sttChunkMs, speechRecognitionAvailable, sttProviderOrder, onCaptionsChange, onInterimChange, onErrorChange, meetingId }: STTProps) {
   const { localParticipant, isMicrophoneEnabled } = useLocalParticipant();
   const room = useRoomContext();
   const identity = localParticipant?.identity ?? "Guest";
@@ -554,6 +554,7 @@ function RoomTranscriptionController({ sttDisabled, sttLang, sttChunkMs, speechR
   const recorderRef = useRef<MediaRecorder | null>(null);
   const queueRef = useRef<Promise<void>>(Promise.resolve());
   const activeProviderRef = useRef<SttProvider | null>(null);
+  const lastFinalRef = useRef<{ norm: string; at: number } | null>(null);
 
   const broadcast = useCallback((text: string) => {
     if (!localParticipant) return;
@@ -564,13 +565,22 @@ function RoomTranscriptionController({ sttDisabled, sttLang, sttChunkMs, speechR
   }, [localParticipant]);
 
   const finalize = useCallback((text: string) => {
-    if (!text.trim()) return;
+    const trimmed = text.trim();
+    if (!trimmed) return;
+
+    // Guard against STT looping/hallucinating the same short phrase on silence.
+    const norm = trimmed.toLowerCase().replace(/\s+/g, " ").trim();
+    const last = lastFinalRef.current;
+    const now = Date.now();
+    if (last && last.norm === norm && now - last.at < 15_000) return;
+    lastFinalRef.current = { norm, at: now };
+
     const display = identityToDisplay(identity);
-    const line = `${display}: ${text}`;
+    const line = `${display}: ${trimmed}`;
     onCaptionsChange((c) => [...c, line]);
-    broadcast(text);
+    broadcast(trimmed);
     if (meetingId) {
-      void supabase.from("transcripts").insert({ meeting_id: meetingId, speaker_name: display, transcript_text: text });
+      void supabase.from("transcripts").insert({ meeting_id: meetingId, speaker_name: display, transcript_text: trimmed });
     }
   }, [identity, onCaptionsChange, broadcast, meetingId]);
 
@@ -633,8 +643,15 @@ function RoomTranscriptionController({ sttDisabled, sttLang, sttChunkMs, speechR
       return () => { stopWS(); };
     };
 
-    const transcribeChunk = async (provider: "deepgram" | "whisper", blob: Blob) => {
-      const res = await fetch("/api/stt", { method: "POST", headers: { "x-stt-provider": provider, "x-stt-lang": sttLang, "content-type": blob.type || "audio/webm" }, body: blob });
+    const transcribeChunk = async (provider: "deepgram" | "whisper", blob: Blob, rms?: number, silentCount?: number) => {
+      const headers: Record<string, string> = {
+        "x-stt-provider": provider,
+        "x-stt-lang": sttLang,
+        "content-type": blob.type || "audio/webm",
+      };
+      if (typeof rms === "number" && Number.isFinite(rms)) headers["x-audio-rms"] = String(rms);
+      if (typeof silentCount === "number" && Number.isFinite(silentCount)) headers["x-silent-chunks"] = String(silentCount);
+      const res = await fetch("/api/stt", { method: "POST", headers, body: blob });
       if (!res.ok) {
         const bodyText = await res.text().catch(() => "");
         try {
@@ -714,7 +731,7 @@ function RoomTranscriptionController({ sttDisabled, sttLang, sttChunkMs, speechR
         //    This prevents fan noise, keyboard clicks, and street noise from
         //    being sent to the STT API and appearing as phantom captions.
         if (preprocessor) {
-          const speechDetected = isSpeechPresent(preprocessor.analyser, 0.007);
+          const speechDetected = isSpeechPresent(preprocessor.analyser, 0.009);
           if (!speechDetected) {
             silentChunks++;
             if (silentChunks >= 2) return; // skip consecutive silent chunks
@@ -723,10 +740,13 @@ function RoomTranscriptionController({ sttDisabled, sttLang, sttChunkMs, speechR
           }
         }
 
+        const rms = preprocessor ? getAudioRMS(preprocessor.analyser) : undefined;
+        const silentCount = silentChunks;
+
         queueRef.current = queueRef.current.then(async () => {
           if (cancelled || activeProviderRef.current !== provider) return;
           try {
-            const text = await transcribeChunk(provider, e.data);
+            const text = await transcribeChunk(provider, e.data, rms, silentCount);
             if (text) { finalize(text); onInterimChange(""); failures.count = 0; }
           } catch (err) {
             failures.count++;
@@ -760,7 +780,7 @@ function RoomTranscriptionController({ sttDisabled, sttLang, sttChunkMs, speechR
 
     const supports = (p: SttProvider) =>
       p === "webspeech" ? speechRecognitionAvailable
-      : typeof navigator.mediaDevices?.getUserMedia === "function" && typeof MediaRecorder !== "undefined";
+        : typeof navigator.mediaDevices?.getUserMedia === "function" && typeof MediaRecorder !== "undefined";
 
     activate = async (idx: number) => {
       currentStop?.(); currentStop = null; activeProviderRef.current = null;
