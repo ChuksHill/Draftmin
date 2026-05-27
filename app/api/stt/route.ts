@@ -6,19 +6,18 @@ function parseProviderOrder(value: string | null | undefined): SttProvider[] {
   if (!value) return [];
   return value
     .split(",")
-    .map((entry) => entry.trim().toLowerCase())
-    .filter((entry): entry is SttProvider => entry === "deepgram" || entry === "whisper");
+    .map((e) => e.trim().toLowerCase())
+    .filter((e): e is SttProvider => e === "deepgram" || e === "whisper");
 }
 
 function normalizeLang(value: string | null | undefined) {
   const trimmed = value?.trim();
   if (!trimmed) return undefined;
-  // Providers typically accept BCP-47. Whisper (OpenAI) expects ISO-639-1 in many examples.
-  // We keep the raw tag for Deepgram and best-effort map for Whisper.
   const [base] = trimmed.split("-");
-  return { raw: trimmed, base: base?.toLowerCase() || undefined };
+  return { raw: trimmed, base: base?.toLowerCase() };
 }
 
+/* ─── Deepgram ───────────────────────────────────────────────────────────── */
 async function transcribeWithDeepgram(params: {
   audio: ArrayBuffer;
   contentType: string;
@@ -32,6 +31,20 @@ async function transcribeWithDeepgram(params: {
   url.searchParams.set("model", model);
   url.searchParams.set("smart_format", "true");
   url.searchParams.set("punctuate", "true");
+  url.searchParams.set("numerals", "true");          // "twenty five" → "25"
+  url.searchParams.set("filler_words", "false");      // strip um, uh, er
+  url.searchParams.set("disfluencies", "false");      // strip false starts
+  url.searchParams.set("profanity_filter", "false");
+
+  // Wait 400 ms of silence before closing an utterance — longer than the 10 ms
+  // default. Nigerian English often has natural mid-sentence pauses that the
+  // default endpointing cuts short, producing fragmented transcripts.
+  url.searchParams.set("endpointing", "400");
+  url.searchParams.set("utterance_end_ms", "1200");
+
+  // Deepgram's server-side noise reduction pass
+  url.searchParams.set("extra", "noise_reduction:true");
+
   if (params.lang) url.searchParams.set("language", params.lang);
 
   const response = await fetch(url.toString(), {
@@ -49,11 +62,44 @@ async function transcribeWithDeepgram(params: {
   }
 
   const data = (await response.json()) as {
-    results?: { channels?: Array<{ alternatives?: Array<{ transcript?: string }> }> };
+    results?: {
+      channels?: Array<{
+        alternatives?: Array<{ transcript?: string; confidence?: number }>;
+      }>;
+    };
   };
 
-  const transcript = data.results?.channels?.[0]?.alternatives?.[0]?.transcript?.trim() ?? "";
-  return transcript;
+  const result = data.results?.channels?.[0]?.alternatives?.[0];
+
+  // Reject results where Deepgram itself is not confident — these are almost
+  // always background noise that slipped past the VAD filter.
+  if (result?.confidence !== undefined && result.confidence < 0.5) {
+    return "";
+  }
+
+  return result?.transcript?.trim() ?? "";
+}
+
+/* ─── Whisper ────────────────────────────────────────────────────────────── */
+
+/**
+ * Known Whisper hallucinations — outputs the model produces on silence or
+ * very-low-energy audio. Returning empty string for these prevents phantom
+ * captions appearing during background noise.
+ */
+const HALLUCINATIONS = new Set([
+  "you", "thank you", "thank you.", "thanks.", "thanks",
+  "bye", "bye.", "goodbye", "goodbye.", "see you",
+  ".", "..", "...", "okay", "ok", "yes", "no",
+  "subtitles by", "transcribed by", "www.", "http",
+  "i'll see you", "subscribe", "like and subscribe",
+  "i'm sorry", "i'm sorry.", "sorry", "sorry.",
+  "hmm", "hmm.", "hm", "hm.",
+]);
+
+function isHallucination(text: string): boolean {
+  const lower = text.toLowerCase().trim();
+  return lower.length < 3 || HALLUCINATIONS.has(lower);
 }
 
 async function transcribeWithWhisper(params: {
@@ -61,74 +107,75 @@ async function transcribeWithWhisper(params: {
   contentType: string;
   langBase?: string;
 }): Promise<string> {
-  const groqApiKey = process.env.GROQ_API_KEY;
-  if (groqApiKey) {
+  // Telling Whisper upfront that it's hearing Nigerian English significantly
+  // reduces substitution errors — the model adjusts its prior on phoneme
+  // sequences to match West African English pronunciation patterns.
+  const PROMPT =
+    "This is a business meeting conducted in Nigerian English. " +
+    "Speakers may use West African English pronunciation, rhythm, and vocabulary. " +
+    "Transcribe exactly what is said. Use proper punctuation and capitalisation. " +
+    "Do not hallucinate or fill silence with words.";
+
+  const buildForm = (model: string) => {
+    const form = new FormData();
+    form.set("model", model);
+    form.set("temperature", "0");          // deterministic — most accurate
+    form.set("response_format", "json");
+    form.set("prompt", PROMPT);
+    if (params.langBase) form.set("language", params.langBase);
+    form.set(
+      "file",
+      new File([params.audio], "audio.webm", { type: params.contentType || "audio/webm" })
+    );
+    return form;
+  };
+
+  // Try Groq first — faster, free tier, same model
+  const groqKey = process.env.GROQ_API_KEY;
+  if (groqKey) {
     try {
-      const model = "whisper-large-v3";
-      const form = new FormData();
-      form.set("model", model);
-      form.set("temperature", "0");
-      form.set("response_format", "json");
-      if (params.langBase) form.set("language", params.langBase);
-
-      const file = new File([params.audio], "audio.webm", { type: params.contentType || "audio/webm" });
-      form.set("file", file);
-
-      const response = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+      const groqModel = process.env.GROQ_WHISPER_MODEL?.trim() || "whisper-large-v3";
+      const res = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${groqApiKey}`,
-        },
-        body: form,
+        headers: { Authorization: `Bearer ${groqKey}` },
+        body: buildForm(groqModel),
       });
-
-      if (response.ok) {
-        const data = (await response.json()) as { text?: string };
-        return data.text?.trim() ?? "";
+      if (res.ok) {
+        const data = (await res.json()) as { text?: string };
+        const text = data.text?.trim() ?? "";
+        return isHallucination(text) ? "" : text;
       }
-      
-      const errorText = await response.text().catch(() => "");
-      console.warn(`Groq Whisper error (${response.status}): ${errorText}. Falling back to OpenAI Whisper.`);
+      console.warn(`[stt] Groq Whisper ${res.status}, falling back to OpenAI.`);
     } catch (e) {
-      console.warn("Groq Whisper failed, falling back to OpenAI:", e);
+      console.warn("[stt] Groq Whisper failed:", e);
     }
   }
 
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error("Missing both GROQ_API_KEY and OPENAI_API_KEY");
+  // Fallback to OpenAI Whisper
+  const openAiKey = process.env.OPENAI_API_KEY;
+  if (!openAiKey) throw new Error("Missing both GROQ_API_KEY and OPENAI_API_KEY");
+  const openAiModel = process.env.OPENAI_WHISPER_MODEL?.trim() || "whisper-1";
 
-  const model = process.env.OPENAI_WHISPER_MODEL?.trim() || "whisper-1";
-
-  const form = new FormData();
-  form.set("model", model);
-  form.set("temperature", "0");
-  form.set("response_format", "json");
-  if (params.langBase) form.set("language", params.langBase);
-
-  const file = new File([params.audio], "audio.webm", { type: params.contentType || "audio/webm" });
-  form.set("file", file);
-
-  const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+  const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: form,
+    headers: { Authorization: `Bearer ${openAiKey}` },
+    body: buildForm(openAiModel),
   });
 
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(`Whisper error (${response.status}): ${text || response.statusText}`);
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Whisper error (${res.status}): ${text || res.statusText}`);
   }
 
-  const data = (await response.json()) as { text?: string };
-  return data.text?.trim() ?? "";
+  const data = (await res.json()) as { text?: string };
+  const text = data.text?.trim() ?? "";
+  return isHallucination(text) ? "" : text;
 }
 
+/* ─── Route handler ──────────────────────────────────────────────────────── */
 export async function POST(request: Request) {
   try {
-    const disabled = (process.env.NEXT_PUBLIC_STT_DISABLED ?? "").trim();
-    if (disabled) {
+    if ((process.env.NEXT_PUBLIC_STT_DISABLED ?? "").trim()) {
       return NextResponse.json({ error: "STT disabled" }, { status: 503 });
     }
 
@@ -136,48 +183,51 @@ export async function POST(request: Request) {
     const contentType = contentTypeHeader.split(";")[0]?.trim() || "application/octet-stream";
     const lang = normalizeLang(request.headers.get("x-stt-lang"));
 
-    const requestedProviderRaw = request.headers.get("x-stt-provider")?.trim().toLowerCase();
+    const reqProvider = request.headers.get("x-stt-provider")?.trim().toLowerCase();
     const requestedProvider: SttProvider | undefined =
-      requestedProviderRaw === "deepgram" || requestedProviderRaw === "whisper" ? requestedProviderRaw : undefined;
-    const requestedOrder = parseProviderOrder(request.headers.get("x-stt-provider-order"));
+      reqProvider === "deepgram" || reqProvider === "whisper" ? reqProvider : undefined;
 
-    const envOrderPrimary = parseProviderOrder(process.env.STT_HYBRID_PROVIDER_ORDER);
-    const envOrderFallback = parseProviderOrder(process.env.NEXT_PUBLIC_STT_PROVIDER_ORDER);
-    const envOrder = envOrderPrimary.length > 0 ? envOrderPrimary : envOrderFallback;
+    const reqOrder = parseProviderOrder(request.headers.get("x-stt-provider-order"));
+    const envOrder = parseProviderOrder(
+      process.env.STT_HYBRID_PROVIDER_ORDER || process.env.NEXT_PUBLIC_STT_PROVIDER_ORDER
+    );
 
     const providerOrder: SttProvider[] =
-      requestedProvider ? [requestedProvider] : requestedOrder.length > 0 ? requestedOrder : envOrder.length > 0 ? envOrder : ["deepgram", "whisper"];
+      requestedProvider ? [requestedProvider]
+      : reqOrder.length > 0 ? reqOrder
+      : envOrder.length > 0 ? envOrder
+      : ["deepgram", "whisper"];
 
     const audio = await request.arrayBuffer();
-    if (audio.byteLength === 0) {
-      return NextResponse.json({ error: "Empty audio payload" }, { status: 400 });
+
+    // Skip chunks that are too small — almost certainly silence or noise.
+    // 1 000 bytes ≈ 62 ms of 128 kbps audio; real speech at 2.5 s chunks
+    // should produce 10–80 KB.
+    if (audio.byteLength < 1_000) {
+      return NextResponse.json({ provider: "skipped", text: "" });
     }
 
-    const errors: Array<{ provider: SttProvider; message: string }> = [];
+    const errors: { provider: SttProvider; message: string }[] = [];
+
     for (const provider of providerOrder) {
       try {
         const text =
           provider === "deepgram"
             ? await transcribeWithDeepgram({ audio, contentType, lang: lang?.raw })
             : await transcribeWithWhisper({ audio, contentType, langBase: lang?.base });
-
         return NextResponse.json({ provider, text });
       } catch (error) {
-        errors.push({ provider, message: error instanceof Error ? error.message : String(error) });
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`[stt] provider failed: ${provider} (${contentType})`, message);
+        errors.push({ provider, message });
       }
     }
 
-    return NextResponse.json(
-      {
-        error: "All STT providers failed",
-        errors,
-      },
-      { status: 502 },
-    );
+    return NextResponse.json({ error: "All STT providers failed", errors }, { status: 502 });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : String(error) },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }
