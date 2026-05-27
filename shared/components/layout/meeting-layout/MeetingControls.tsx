@@ -224,7 +224,7 @@ export function MeetingControls({
       </div>
 
       {/* ── Mobile compact bar ────────────────────────────────────────── */}
-      <div className="flex sm:hidden items-end gap-3 bg-[#14151c]/90 backdrop-blur-2xl border border-white/[0.08] rounded-2xl px-4 py-3 shadow-[0_8px_40px_rgba(0,0,0,0.6)]">
+      <div className="flex sm:hidden items-end gap-2 xs:gap-3 bg-[#14151c]/90 backdrop-blur-2xl border border-white/[0.08] rounded-2xl px-3 xs:px-4 py-3 shadow-[0_8px_40px_rgba(0,0,0,0.6)]">
         <Btn label={isMicrophoneEnabled ? "Mute" : "Unmute"} danger={!isMicrophoneEnabled}
           onClick={toggleMic} disabled={togglingMic} icon={isMicrophoneEnabled ? <IC.MicOn /> : <IC.MicOff />} />
         <Btn label={isCameraEnabled ? "Stop" : "Start"} danger={!isCameraEnabled}

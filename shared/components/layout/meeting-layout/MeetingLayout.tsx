@@ -31,7 +31,7 @@ export function MeetingLayout({
           {/* Floating controls */}
           <div
             className={[
-              "absolute bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 z-20 transition-all duration-500 w-[calc(100%-2rem)] sm:w-auto flex justify-center",
+              "absolute left-0 right-0 z-20 flex justify-center px-4 sm:px-0 transition-all duration-500 bottom-[calc(env(safe-area-inset-bottom)+1rem)] sm:bottom-[calc(env(safe-area-inset-bottom)+1.5rem)]",
               controlsVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-3 pointer-events-none",
             ].join(" ")}
           >
