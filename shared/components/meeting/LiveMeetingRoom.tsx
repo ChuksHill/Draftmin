@@ -16,7 +16,7 @@ import { RoomEvent, Track } from "livekit-client";
 import { MeetingLayout } from "@/shared/components/layout/meeting-layout/MeetingLayout";
 import { MeetingHeader } from "@/shared/components/layout/meeting-layout/MeetingHeader";
 import { MeetingControls, MeetingPanel } from "@/shared/components/layout/meeting-layout/MeetingControls";
-import { createAudioPreprocessor, getAudioRMS, isSpeechPresent } from "@/shared/lib/audio/audioPreprocessor";
+import { createAudioPreprocessor, createRollingVAD } from "@/shared/lib/audio/audioPreprocessor";
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 type SttProvider = "deepgram" | "whisper" | "webspeech";
@@ -536,7 +536,7 @@ function SidePanel({
   );
 }
 
-/* ─── STT controller (improved) ─────────────────────────────────────────── */
+/* ─── STT controller ─────────────────────────────────────────────────────── */
 type STTProps = {
   sttDisabled: boolean; sttLang: string; sttChunkMs: number;
   speechRecognitionAvailable: boolean; sttProviderOrder: SttProvider[];
@@ -545,15 +545,16 @@ type STTProps = {
   meetingId: string | null;
 };
 
-  function RoomTranscriptionController({ sttDisabled, sttLang, sttChunkMs, speechRecognitionAvailable, sttProviderOrder, onCaptionsChange, onInterimChange, onErrorChange, meetingId }: STTProps) {
+function RoomTranscriptionController({ sttDisabled, sttLang, sttChunkMs, speechRecognitionAvailable, sttProviderOrder, onCaptionsChange, onInterimChange, onErrorChange, meetingId }: STTProps) {
   const { localParticipant, isMicrophoneEnabled } = useLocalParticipant();
   const room = useRoomContext();
   const identity = localParticipant?.identity ?? "Guest";
   const recRef = useRef<any>(null);
-  const streamRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const queueRef = useRef<Promise<void>>(Promise.resolve());
   const activeProviderRef = useRef<SttProvider | null>(null);
+  // Tighter dedup window (4 s) — only blocks true Whisper hallucination loops,
+  // not legitimate repeated short phrases.
   const lastFinalRef = useRef<{ norm: string; at: number } | null>(null);
 
   const broadcast = useCallback((text: string) => {
@@ -567,14 +568,12 @@ type STTProps = {
   const finalize = useCallback((text: string) => {
     const trimmed = text.trim();
     if (!trimmed) return;
-
-    // Guard against STT looping/hallucinating the same short phrase on silence.
     const norm = trimmed.toLowerCase().replace(/\s+/g, " ").trim();
     const last = lastFinalRef.current;
     const now = Date.now();
-    if (last && last.norm === norm && now - last.at < 15_000) return;
+    // 4 s dedup window — tight enough to allow real repeated speech
+    if (last && last.norm === norm && now - last.at < 4_000) return;
     lastFinalRef.current = { norm, at: now };
-
     const display = identityToDisplay(identity);
     const line = `${display}: ${trimmed}`;
     onCaptionsChange((c) => [...c, line]);
@@ -604,137 +603,153 @@ type STTProps = {
     if (sttDisabled || !isMicrophoneEnabled) { onInterimChange(""); return; }
     let cancelled = false;
 
+    // ── WebSpeech cleanup ────────────────────────────────────────────────────
     const stopWS = () => {
       const r = recRef.current; recRef.current = null;
       if (!r) return;
-      try { r.onresult = undefined; r.onend = undefined; r.onerror = undefined; r.stop?.(); } catch { /* ignore */ }
+      try { r.onresult = null; r.onend = null; r.onerror = null; r.abort?.(); } catch { /* ignore */ }
     };
+
+    // ── MediaRecorder cleanup ────────────────────────────────────────────────
     const stopMR = () => {
       const rec = recorderRef.current; recorderRef.current = null;
       try { if (rec && rec.state !== "inactive") rec.stop(); } catch { /* ignore */ }
-      const s = streamRef.current; streamRef.current = null;
-      try { s?.getTracks().forEach((t) => t.stop()); } catch { /* ignore */ }
     };
 
     let currentIndex = 0;
     let currentStop: (() => void) | null = null;
     let activate: (idx: number) => Promise<void>;
 
-   const startWS = (): (() => void) => {
-  const win = window as any;
-  const SR = win.SpeechRecognition ?? win.webkitSpeechRecognition;
-  if (!SR) throw new Error("Browser speech recognition unavailable.");
+    // ── WebSpeech provider ───────────────────────────────────────────────────
+    const startWS = (): (() => void) => {
+      const win = window as any;
+      const SR = win.SpeechRecognition ?? win.webkitSpeechRecognition;
+      if (!SR) throw new Error("Browser speech recognition unavailable.");
 
-  const r = new SR();
-  r.continuous = true;
-  r.interimResults = true;
-  r.lang = sttLang;
-  r.maxAlternatives = 1;
+      let restartTimer: ReturnType<typeof setTimeout> | null = null;
 
-  r.onresult = (e: any) => {
-    let interim = "";
-    const finals: string[] = [];
+      const r = new SR();
+      r.continuous = true;
+      r.interimResults = true;
+      r.lang = sttLang;
+      r.maxAlternatives = 1;
 
-    for (let i = e.resultIndex; i < e.results.length; i++) {
-      const t = e.results[i][0]?.transcript?.trim();
-      if (!t) continue;
-
-      if (e.results[i].isFinal) finals.push(t);
-      else interim = t;
-    }
-
-    if (interim) onInterimChange(interim);
-
-    if (finals.length) {
-      finals.forEach(finalize);
-      onInterimChange("");
-    }
-  };
-
-  r.onerror = (e: any) => {
-    onErrorChange(e.error ?? "STT error");
-  };
-
-  r.onend = () => {
-    if (!recRef.current || cancelled) return;
-    try {
-      r.start();
-    } catch {}
-  };
-
-  r.start();
-  recRef.current = r;
-
-  return () => {
-    stopWS();
-  };
-};
-    const transcribeChunk = async (provider: "deepgram" | "whisper", blob: Blob, rms?: number, silentCount?: number) => {
-      const headers: Record<string, string> = {
-        "x-stt-provider": provider,
-        "x-stt-lang": sttLang,
-        "content-type": blob.type || "audio/webm",
+      r.onresult = (e: any) => {
+        let interim = "";
+        const finals: string[] = [];
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          const t = e.results[i][0]?.transcript?.trim();
+          if (!t) continue;
+          if (e.results[i].isFinal) finals.push(t);
+          else interim = t;
+        }
+        if (interim) onInterimChange(interim);
+        if (finals.length) { finals.forEach(finalize); onInterimChange(""); }
       };
-      if (typeof rms === "number" && Number.isFinite(rms)) headers["x-audio-rms"] = String(rms);
-      if (typeof silentCount === "number" && Number.isFinite(silentCount)) headers["x-silent-chunks"] = String(silentCount);
-      const res = await fetch("/api/stt", { method: "POST", headers, body: blob });
+
+      r.onerror = (e: any) => {
+        // "no-speech" is normal during silence — don't surface as an error
+        if (e.error === "no-speech") return;
+        onErrorChange(e.error ?? "STT error");
+      };
+
+      r.onend = () => {
+        if (!recRef.current || cancelled) return;
+        // Debounce restart to avoid rapid-fire loops on mobile
+        restartTimer = setTimeout(() => {
+          if (!recRef.current || cancelled) return;
+          try { r.start(); } catch { /* ignore */ }
+        }, 300);
+      };
+
+      r.start();
+      recRef.current = r;
+
+      return () => {
+        if (restartTimer) clearTimeout(restartTimer);
+        stopWS();
+      };
+    };
+
+    // ── Whisper / Deepgram chunk sender ──────────────────────────────────────
+    const transcribeChunk = async (provider: "deepgram" | "whisper", blob: Blob) => {
+      const res = await fetch("/api/stt", {
+        method: "POST",
+        headers: {
+          "x-stt-provider": provider,
+          "x-stt-lang": sttLang,
+          // Send the real MIME type so the server names the file correctly
+          "content-type": blob.type || "audio/webm",
+        },
+        body: blob,
+      });
       if (!res.ok) {
         const bodyText = await res.text().catch(() => "");
-        try {
-          const parsed = JSON.parse(bodyText) as { error?: string; errors?: Array<{ provider?: string; message?: string }> };
-          if (parsed?.errors?.length) {
-            const details = parsed.errors
-              .map((e) => `${e.provider ?? "provider"}: ${e.message ?? "unknown error"}`)
-              .join(" | ");
-            throw new Error(details);
-          }
-          throw new Error(parsed?.error || bodyText || `STT ${res.status}`);
-        } catch {
-          throw new Error(bodyText || `STT ${res.status}`);
-        }
+        let msg = bodyText;
+        try { msg = (JSON.parse(bodyText) as any)?.error || bodyText; } catch { /* ignore */ }
+        throw new Error(msg || `STT ${res.status}`);
       }
       const d = await res.json() as { text?: string; error?: string };
       if (d.error) throw new Error(d.error);
       return (d.text ?? "").trim();
     };
 
+    // ── Server-side STT (Whisper / Deepgram) ────────────────────────────────
     const startServerSTT = async (provider: "deepgram" | "whisper"): Promise<() => void> => {
-      if (!navigator.mediaDevices?.getUserMedia) throw new Error("getUserMedia not supported.");
       if (typeof MediaRecorder === "undefined") throw new Error("MediaRecorder not supported.");
 
-      // ── 1. Capture raw mic with aggressive browser-level noise suppression ─
-      const rawStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          // 16 kHz mono is the native format Deepgram nova-3 and Whisper expect
-          sampleRate: { ideal: 16_000 },
-          channelCount: { ideal: 1 },
-        },
-      });
+      // ── FIX 1: Reuse LiveKit's existing mic track instead of a second getUserMedia ──
+      // Opening a second getUserMedia while LiveKit holds the mic causes AGC
+      // conflicts on Android and fails silently on iOS.
+      let rawStream: MediaStream | null = null;
+      const livekitTrack = localParticipant?.getTrackPublication(Track.Source.Microphone)?.track;
 
-      if (cancelled) { rawStream.getTracks().forEach((t) => t.stop()); throw new Error("Cancelled"); }
-      streamRef.current = rawStream;
+      if (livekitTrack?.mediaStream) {
+        rawStream = livekitTrack.mediaStream;
+        console.log("[stt] reusing LiveKit mic track");
+      } else {
+        // Fallback: open our own stream if LiveKit track isn't available yet
+        if (!navigator.mediaDevices?.getUserMedia) throw new Error("getUserMedia not supported.");
+        rawStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            sampleRate: { ideal: 16_000 },
+            channelCount: { ideal: 1 },
+          },
+        });
+        console.log("[stt] opened fallback mic stream");
+      }
 
-      // ── 2. Route through Web Audio processing chain ────────────────────────
-      //    high-pass → low-pass → compressor → gain → analyser → destination
-      //    MediaRecorder records the *processed* stream, not the raw mic.
+      if (cancelled) {
+        // Only stop tracks we opened ourselves, never LiveKit's
+        if (!livekitTrack?.mediaStream) rawStream?.getTracks().forEach((t) => t.stop());
+        throw new Error("Cancelled");
+      }
+
+      // ── FIX 2: Run stream through Web Audio with AudioContext.resume() ────
       let preprocessor: Awaited<ReturnType<typeof createAudioPreprocessor>> | null = null;
-      let recordStream = rawStream;
+      let recordStream: MediaStream = rawStream;
 
       try {
         preprocessor = await createAudioPreprocessor(rawStream);
+        // FIX 2a: Ensure AudioContext is running (suspended by default on mobile)
+        await preprocessor.resume();
         recordStream = preprocessor.processedStream;
       } catch (e) {
-        console.warn("[stt] Audio preprocessing unavailable, using raw stream:", e);
+        console.warn("[stt] preprocessing unavailable, recording raw:", e);
       }
 
-      // ── 3. Pick highest-quality container format ───────────────────────────
-      const mime =
-        ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"].find(
-          (t) => MediaRecorder.isTypeSupported(t)
-        ) ?? "";
+      // ── FIX 3: Choose the best supported MIME; include audio/mp4 for iOS ──
+      const MIME_CANDIDATES = [
+        "audio/webm;codecs=opus",
+        "audio/webm",
+        "audio/ogg;codecs=opus",
+        "audio/mp4",          // iOS Safari / Android fallback
+      ];
+      const mime = MIME_CANDIDATES.find((t) => MediaRecorder.isTypeSupported(t)) ?? "";
+      console.log("[stt] MediaRecorder mime:", mime || "(browser default)");
 
       const recorder = new MediaRecorder(
         recordStream,
@@ -743,41 +758,36 @@ type STTProps = {
       recorderRef.current = recorder;
 
       const failures = { count: 0 };
-      const MAX_FAILURES_BEFORE_FALLBACK = 3;
-      // Allow up to 1 consecutive silent chunk (handles natural mid-sentence pauses),
-      // then skip until speech energy returns.
-      let silentChunks = 0;
+      const MAX_FAILURES = 3;
+
+      // ── FIX 4: Rolling VAD — poll every 80 ms, consume flag per chunk ─────
+      // End-of-chunk snapshots miss speech that finished before the chunk
+      // boundary. Rolling polling catches it reliably.
+      const vad = preprocessor
+        ? createRollingVAD(preprocessor.analyser, { pollMs: 80, threshold: 0.008 })
+        : null;
 
       recorder.ondataavailable = (e) => {
-        // Skip near-empty blobs — definitely not speech
-        if (!e.data?.size || e.data.size < 500) return;
+        if (!e.data?.size || e.data.size < 800) return;
 
-        // ── 4. VAD — only forward to STT when speech energy is present ────────
-        //    Reads the analyser RMS at the END of the recorded chunk window.
-        //    This prevents fan noise, keyboard clicks, and street noise from
-        //    being sent to the STT API and appearing as phantom captions.
-        if (preprocessor) {
-          const speechDetected = isSpeechPresent(preprocessor.analyser, 0.009);
-          if (!speechDetected) {
-            silentChunks++;
-            if (silentChunks >= 2) return; // skip consecutive silent chunks
-          } else {
-            silentChunks = 0;
-          }
+        // ── FIX 5: Use rolling VAD result, not a single end-of-chunk sample ─
+        if (vad && !vad.consumeSpeechDetected()) {
+          console.log("[stt] VAD: silent chunk skipped");
+          return;
         }
 
-        const rms = preprocessor ? getAudioRMS(preprocessor.analyser) : undefined;
-        const silentCount = silentChunks;
+        const blob = e.data;
 
         queueRef.current = queueRef.current.then(async () => {
           if (cancelled || activeProviderRef.current !== provider) return;
           try {
-            const text = await transcribeChunk(provider, e.data, rms, silentCount);
+            const text = await transcribeChunk(provider, blob);
             if (text) { finalize(text); onInterimChange(""); failures.count = 0; }
           } catch (err) {
             failures.count++;
+            console.warn("[stt] chunk error:", err);
             onErrorChange(err instanceof Error ? err.message : String(err));
-            if (failures.count >= MAX_FAILURES_BEFORE_FALLBACK) {
+            if (failures.count >= MAX_FAILURES) {
               failures.count = 0;
               void activate(currentIndex + 1);
             }
@@ -785,28 +795,30 @@ type STTProps = {
         });
       };
 
-      // ── 5. Chunk at max 2.5 s for responsive captions ─────────────────────
+      // ── FIX 6: Use timeslice instead of stop()/start() interval ──────────
+      // timeslice is the standard, race-free way to get periodic chunks.
+      // stop()/start() has an async gap where ondataavailable fires AFTER
+      // stop() but start() is already called — throws InvalidStateError on
+      // Android and silently drops chunks on desktop.
       const CHUNK_MS = Math.min(sttChunkMs, 2_500);
-      recorder.start();
+      recorder.start(CHUNK_MS);
 
-      const id = setInterval(() => {
-        if (cancelled) { clearInterval(id); return; }
-        try { if (recorder.state === "recording") { recorder.stop(); recorder.start(); } } catch { /* ignore */ }
-      }, CHUNK_MS);
+      const ownedStream = livekitTrack?.mediaStream ? null : rawStream;
 
       return () => {
-        clearInterval(id);
+        vad?.stop();
         try { if (recorder.state !== "inactive") recorder.stop(); } catch { /* ignore */ }
         recorderRef.current = null;
         preprocessor?.cleanup();
-        rawStream.getTracks().forEach((t) => t.stop());
-        streamRef.current = null;
+        // Only stop tracks we opened ourselves
+        ownedStream?.getTracks().forEach((t) => t.stop());
       };
     };
 
     const supports = (p: SttProvider) =>
-      p === "webspeech" ? speechRecognitionAvailable
-        : typeof navigator.mediaDevices?.getUserMedia === "function" && typeof MediaRecorder !== "undefined";
+      p === "webspeech"
+        ? speechRecognitionAvailable
+        : typeof MediaRecorder !== "undefined";
 
     activate = async (idx: number) => {
       currentStop?.(); currentStop = null; activeProviderRef.current = null;
@@ -815,10 +827,15 @@ type STTProps = {
         const p = sttProviderOrder[i];
         if (!supports(p)) continue;
         try {
-          const stop = p === "webspeech" ? (stopMR(), startWS()) : await startServerSTT(p as "deepgram" | "whisper");
+          const stop = p === "webspeech"
+            ? (stopMR(), startWS())
+            : await startServerSTT(p as "deepgram" | "whisper");
           if (cancelled) { stop(); return; }
-          currentStop = stop; currentIndex = i; activeProviderRef.current = p; return;
+          currentStop = stop; currentIndex = i; activeProviderRef.current = p;
+          console.log("[stt] active provider:", p);
+          return;
         } catch (e) {
+          console.warn("[stt] provider failed:", p, e);
           onErrorChange(e instanceof Error ? e.message : String(e));
         }
       }
@@ -826,13 +843,17 @@ type STTProps = {
     };
 
     void activate(0);
+    // Retry primary provider every 60 s if we fell back to a secondary
     const retryId = setInterval(() => { if (!cancelled && currentIndex > 0) void activate(0); }, 60_000);
 
     return () => {
-      cancelled = true; clearInterval(retryId);
-      currentStop?.(); stopWS(); stopMR();
+      cancelled = true;
+      clearInterval(retryId);
+      currentStop?.();
+      stopWS();
+      stopMR();
     };
-  }, [speechRecognitionAvailable, sttChunkMs, sttDisabled, sttLang, sttProviderOrder, isMicrophoneEnabled, finalize]);
+  }, [speechRecognitionAvailable, sttChunkMs, sttDisabled, sttLang, sttProviderOrder, isMicrophoneEnabled, finalize, localParticipant]);
 
   return null;
 }

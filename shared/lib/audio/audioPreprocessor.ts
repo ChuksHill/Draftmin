@@ -3,46 +3,77 @@ export type AudioPreprocessorResult = {
   analyser: AnalyserNode;
   audioContext: AudioContext;
   cleanup: () => void;
+  /** Call once after a user gesture if context is still suspended */
+  resume: () => Promise<void>;
 };
 
 export async function createAudioPreprocessor(
   rawStream: MediaStream
 ): Promise<AudioPreprocessorResult> {
-  const isMobile =
-    /iPhone|Android/i.test(navigator.userAgent);
+  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
-  // ⚡ IMPORTANT: DO NOT FORCE sampleRate (breaks mobile Safari/Android)
+  // ── AudioContext: always try to resume immediately ──────────────────────
+  // Modern browsers (Chrome Android, iOS Safari, Firefox) start AudioContext
+  // in "suspended" state unless created inside a direct user-gesture handler.
+  // We call resume() here and also expose it for the caller to retry.
   const audioContext = new AudioContext();
+  try {
+    if (audioContext.state === "suspended") {
+      await audioContext.resume();
+    }
+  } catch (e) {
+    console.warn("[audio] AudioContext resume failed (will retry on gesture):", e);
+  }
 
-  const source =
-    audioContext.createMediaStreamSource(rawStream);
+  const resume = async () => {
+    try {
+      if (audioContext.state !== "running") await audioContext.resume();
+    } catch { /* ignore */ }
+  };
 
-  // ── ANALYSER ONLY (safe for VAD, no heavy processing) ──
+  const source = audioContext.createMediaStreamSource(rawStream);
+
+  // ── ANALYSER (shared by VAD on all platforms) ────────────────────────────
   const analyser = audioContext.createAnalyser();
   analyser.fftSize = 2048;
-  analyser.smoothingTimeConstant = 0.7;
+  analyser.smoothingTimeConstant = 0.6;
 
-  // ── MOBILE MODE (bypass all processing) ──
   if (isMobile) {
-    source.connect(analyser);
+    // ── MOBILE: minimal processing to avoid AudioContext complexity ──────
+    // Still route through the graph so analyser gets real signal.
+    // Return destination.stream (not rawStream) so we have one consistent
+    // audio path; MediaRecorder on mobile records from this processed stream.
+    const destination = audioContext.createMediaStreamDestination();
 
-    const destination =
-      audioContext.createMediaStreamDestination();
+    // Lightweight gain to avoid clipping on mobile mics
+    const gain = audioContext.createGain();
+    gain.gain.value = 1.0;
 
-    analyser.connect(destination);
+    source.connect(gain);
+    gain.connect(analyser);
+    gain.connect(destination);
 
     return {
-      processedStream: rawStream, // 👈 KEY FIX: avoid processed chain on mobile
+      processedStream: destination.stream,
       analyser,
       audioContext,
-      cleanup: () => audioContext.close(),
+      resume,
+      cleanup: () => {
+        try {
+          source.disconnect();
+          gain.disconnect();
+          analyser.disconnect();
+          destination.disconnect();
+          void audioContext.close();
+        } catch { /* ignore */ }
+      },
     };
   }
 
-  // ── DESKTOP PROCESSING PIPELINE ──
+  // ── DESKTOP: full processing pipeline ───────────────────────────────────
   const highPass = audioContext.createBiquadFilter();
   highPass.type = "highpass";
-  highPass.frequency.value = 100;
+  highPass.frequency.value = 80;
   highPass.Q.value = 0.7;
 
   const lowPass = audioContext.createBiquadFilter();
@@ -58,43 +89,38 @@ export async function createAudioPreprocessor(
   compressor.release.value = 0.15;
 
   const gain = audioContext.createGain();
-  gain.gain.value = 1.2; // reduced for stability
+  gain.gain.value = 1.2;
 
-  const destination =
-    audioContext.createMediaStreamDestination();
+  const destination = audioContext.createMediaStreamDestination();
 
-  // ── PIPELINE ──
   source.connect(highPass);
   highPass.connect(lowPass);
   lowPass.connect(compressor);
   compressor.connect(gain);
-
-  // analyser taps AFTER gain (safe VAD signal)
   gain.connect(analyser);
   gain.connect(destination);
-
-  const cleanup = () => {
-    try {
-      source.disconnect();
-      highPass.disconnect();
-      lowPass.disconnect();
-      compressor.disconnect();
-      gain.disconnect();
-      analyser.disconnect();
-      destination.disconnect();
-      void audioContext.close();
-    } catch {}
-  };
 
   return {
     processedStream: destination.stream,
     analyser,
     audioContext,
-    cleanup,
+    resume,
+    cleanup: () => {
+      try {
+        source.disconnect();
+        highPass.disconnect();
+        lowPass.disconnect();
+        compressor.disconnect();
+        gain.disconnect();
+        analyser.disconnect();
+        destination.disconnect();
+        void audioContext.close();
+      } catch { /* ignore */ }
+    },
   };
 }
 
-// ── VAD (UNCHANGED BUT SAFE) ──
+// ── VAD ─────────────────────────────────────────────────────────────────────
 const _vadBuffer = new Float32Array(2048);
 
 export function getAudioRMS(analyser: AnalyserNode): number {
@@ -109,4 +135,37 @@ export function isSpeechPresent(
   threshold = 0.008
 ): boolean {
   return getAudioRMS(analyser) > threshold;
+}
+
+/**
+ * Rolling VAD tracker — polls the analyser on a fixed interval and exposes
+ * `consumeSpeechDetected()` which returns true if any poll in the last chunk
+ * window saw speech, then resets the flag. Use this instead of a single
+ * end-of-chunk snapshot.
+ */
+export function createRollingVAD(
+  analyser: AnalyserNode,
+  options: { pollMs?: number; threshold?: number } = {}
+) {
+  const { pollMs = 80, threshold = 0.008 } = options;
+  let speechSeen = false;
+  let stopped = false;
+
+  const id = setInterval(() => {
+    if (stopped) return;
+    if (isSpeechPresent(analyser, threshold)) speechSeen = true;
+  }, pollMs);
+
+  return {
+    /** Returns true if speech was detected since last call, then resets. */
+    consumeSpeechDetected(): boolean {
+      const v = speechSeen;
+      speechSeen = false;
+      return v;
+    },
+    stop() {
+      stopped = true;
+      clearInterval(id);
+    },
+  };
 }
