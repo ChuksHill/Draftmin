@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 
+export const runtime = "nodejs";
+
 async function transcribeWithWhisper(
-  audio: ArrayBuffer,
+  audioBuffer: ArrayBuffer,
   contentType: string
 ) {
   const apiKey = process.env.OPENAI_API_KEY;
@@ -10,20 +12,15 @@ async function transcribeWithWhisper(
     throw new Error("Missing OPENAI_API_KEY");
   }
 
-  const form = new FormData();
+  // ✅ SAFE BLOB (better than File in Vercel Node)
+  const blob = new Blob([audioBuffer], {
+    type: contentType || "audio/webm",
+  });
 
+  const form = new FormData();
   form.set("model", "whisper-1");
 
-  form.set(
-    "file",
-    new File(
-      [audio],
-      "audio.webm",
-      {
-        type: contentType || "audio/webm",
-      }
-    )
-  );
+  form.set("file", blob, "audio.webm");
 
   const response = await fetch(
     "https://api.openai.com/v1/audio/transcriptions",
@@ -36,27 +33,28 @@ async function transcribeWithWhisper(
     }
   );
 
-  if (!response.ok) {
-    const text = await response.text();
+  const text = await response.text();
 
+  if (!response.ok) {
+    // 🔥 IMPORTANT: better debugging
     throw new Error(
-      `Whisper failed: ${response.status} ${text}`
+      `Whisper failed ${response.status}: ${text}`
     );
   }
 
-  const data = await response.json();
-
-  return data.text || "";
+  try {
+    const data = JSON.parse(text);
+    return data.text || "";
+  } catch {
+    throw new Error("Invalid Whisper response: " + text);
+  }
 }
 
 export async function POST(request: Request) {
   try {
-    const contentTypeHeader =
-      request.headers.get("content-type") ??
-      "audio/webm";
-
     const contentType =
-      contentTypeHeader.split(";")[0];
+      request.headers.get("content-type")?.split(";")[0] ||
+      "audio/webm";
 
     const audio = await request.arrayBuffer();
 
@@ -65,8 +63,13 @@ export async function POST(request: Request) {
       contentType,
     });
 
-    // IMPORTANT:
-    // DO NOT FILTER ANYTHING YET
+    // ❗ CRITICAL GUARD (prevents Whisper crashes)
+    if (audio.byteLength < 1200) {
+      return NextResponse.json(
+        { error: "Audio chunk too small" },
+        { status: 400 }
+      );
+    }
 
     const text = await transcribeWithWhisper(
       audio,
@@ -75,9 +78,7 @@ export async function POST(request: Request) {
 
     console.log("[stt-result]", text);
 
-    return NextResponse.json({
-      text,
-    });
+    return NextResponse.json({ text });
   } catch (error) {
     console.error("[stt-error]", error);
 
@@ -88,9 +89,7 @@ export async function POST(request: Request) {
             ? error.message
             : String(error),
       },
-      {
-        status: 500,
-      }
+      { status: 500 }
     );
   }
 }
