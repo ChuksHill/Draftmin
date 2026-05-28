@@ -88,7 +88,7 @@ export async function POST(request: Request) {
       console.log("[stt] discarded hallucination:", JSON.stringify(text));
       return NextResponse.json({ text: "" });
     }
-
+    
     console.log("[stt] result:", text);
     return NextResponse.json({ text });
   } catch (error) {
