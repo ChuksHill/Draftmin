@@ -620,29 +620,55 @@ type STTProps = {
     let currentStop: (() => void) | null = null;
     let activate: (idx: number) => Promise<void>;
 
-    const startWS = (): (() => void) => {
-      const win = window as any;
-      const SR = win.SpeechRecognition ?? win.webkitSpeechRecognition;
-      if (!SR) throw new Error("Browser speech recognition unavailable.");
-      const r = new SR();
-      r.continuous = true; r.interimResults = true; r.lang = sttLang; r.maxAlternatives = 1;
-      r.onresult = (e: any) => {
-        let interim = "";
-        const finals: string[] = [];
-        for (let i = e.resultIndex; i < e.results.length; i++) {
-          const t = e.results[i][0]?.transcript?.trim();
-          if (!t) continue;
-          if (e.results[i].isFinal) finals.push(t); else interim = t;
-        }
-        if (interim) onInterimChange(interim);
-        if (finals.length) { finals.forEach(finalize); onInterimChange(""); }
-      };
-      r.onerror = (e: any) => { onErrorChange(e.error ?? "STT error"); };
-      r.onend = () => { if (!recRef.current || cancelled) return; try { r.start(); } catch { /* ignore */ } };
-      r.start(); recRef.current = r;
-      return () => { stopWS(); };
-    };
+   const startWS = (): (() => void) => {
+  const win = window as any;
+  const SR = win.SpeechRecognition ?? win.webkitSpeechRecognition;
+  if (!SR) throw new Error("Browser speech recognition unavailable.");
 
+  const r = new SR();
+  r.continuous = true;
+  r.interimResults = true;
+  r.lang = sttLang;
+  r.maxAlternatives = 1;
+
+  r.onresult = (e: any) => {
+    let interim = "";
+    const finals: string[] = [];
+
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const t = e.results[i][0]?.transcript?.trim();
+      if (!t) continue;
+
+      if (e.results[i].isFinal) finals.push(t);
+      else interim = t;
+    }
+
+    if (interim) onInterimChange(interim);
+
+    if (finals.length) {
+      finals.forEach(finalize);
+      onInterimChange("");
+    }
+  };
+
+  r.onerror = (e: any) => {
+    onErrorChange(e.error ?? "STT error");
+  };
+
+  r.onend = () => {
+    if (!recRef.current || cancelled) return;
+    try {
+      r.start();
+    } catch {}
+  };
+
+  r.start();
+  recRef.current = r;
+
+  return () => {
+    stopWS();
+  };
+};
     const transcribeChunk = async (provider: "deepgram" | "whisper", blob: Blob, rms?: number, silentCount?: number) => {
       const headers: Record<string, string> = {
         "x-stt-provider": provider,
