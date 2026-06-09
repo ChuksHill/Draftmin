@@ -13,6 +13,9 @@ type Props = {
   onToggleFullscreen?: () => void;
   viewMode?: "grid" | "speaker";
   onToggleView?: () => void;
+  isHost?: boolean;
+  onEndMeeting?: () => void;
+  onLeave?: () => void;
 };
 
 /* ── SVG Icons ─────────────────────────────────────────────────────────── */
@@ -92,6 +95,11 @@ const IC = {
       <path d="M10.68 13.31a16 16 0 003.41 2.6l1.27-1.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7 2 2 0 011.72 2v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.42 19.42 0 012 6.18 2 2 0 014 4h3a2 2 0 012 1.72 12.84 12.84 0 00.7 2.81 2 2 0 01-.45 2.11L8.09 9.91M23 1L1 23" />
     </svg>
   ),
+  Leave: () => (
+    <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" />
+    </svg>
+  ),
   More: () => (
     <svg viewBox="0 0 24 24" fill="none" className="h-[18px] w-[18px]" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
       <circle cx="12" cy="5" r="1" fill="currentColor" />
@@ -128,16 +136,24 @@ function Btn({
   );
 }
 
-function EndBtn({ onClick }: { onClick?: () => void }) {
+function EndBtn({ onClick, isHost }: { onClick?: () => void; isHost?: boolean }) {
   return (
     <div className="flex flex-col items-center gap-1">
       <button
         type="button"
         onClick={onClick}
-        aria-label="Leave meeting"
-        className="h-11 w-14 rounded-full bg-red-600 hover:bg-red-500 active:scale-90 transition flex items-center justify-center text-white shadow-[0_0_24px_rgba(239,68,68,0.35)]"
-      ><IC.EndCall /></button>
-      <span className="text-[9px] text-white/30 select-none">Leave</span>
+        aria-label={isHost ? "End meeting for all" : "Leave meeting"}
+        className={`h-11 w-14 rounded-full flex items-center justify-center transition active:scale-90 ${
+          isHost 
+            ? "bg-red-600 hover:bg-red-500 text-white shadow-[0_0_24px_rgba(239,68,68,0.35)]" 
+            : "bg-white/10 border border-white/[0.08] text-white/60 hover:text-white hover:bg-white/20"
+        }`}
+      >
+        {isHost ? <IC.EndCall /> : <IC.Leave />}
+      </button>
+      <span className="text-[9px] text-white/30 select-none">
+        {isHost ? "End for all" : "Leave"}
+      </span>
     </div>
   );
 }
@@ -147,6 +163,7 @@ export function MeetingControls({
   activePanel, onTogglePanel, onDeviceError,
   isFullscreen = false, onToggleFullscreen,
   viewMode = "grid", onToggleView,
+  isHost = false, onEndMeeting, onLeave,
 }: Props) {
   const room = useRoomContext();
   const { localParticipant, isMicrophoneEnabled, isCameraEnabled, isScreenShareEnabled } = useLocalParticipant();
@@ -157,10 +174,9 @@ export function MeetingControls({
   const [showMore, setShowMore] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
 
-  // Detect screen share capability (not available on mobile)
+  // Detect screen share capability (capability-based, not UA)
   useEffect(() => {
-    const mobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
-    setCanScreenShare(!mobile && typeof navigator.mediaDevices?.getDisplayMedia === "function");
+    setCanScreenShare(typeof navigator.mediaDevices?.getDisplayMedia === "function");
   }, []);
 
   // Close "more" sheet on outside click
@@ -193,7 +209,7 @@ export function MeetingControls({
     catch (e) { report(e); } finally { setTogglingScreen(false); }
   }, [isScreenShareEnabled, togglingScreen, canScreenShare, report, localParticipant, onDeviceError]);
 
-  /* ── Secondary controls shared between desktop bar & mobile "More" sheet ─ */
+  /* ── Secondary controls ─ */
   const secondaryControls = (
     <>
       {canScreenShare && (
@@ -208,6 +224,14 @@ export function MeetingControls({
     </>
   );
 
+  const handleLeaveClick = () => {
+    if (isHost) {
+      onEndMeeting?.();
+    } else {
+      onLeave?.();
+    }
+  };
+
   return (
     <>
       {/* ── Desktop controls bar ──────────────────────────────────────── */}
@@ -220,17 +244,16 @@ export function MeetingControls({
         <div className="w-px h-9 bg-white/[0.06] mx-0.5 self-center" />
         {secondaryControls}
         <div className="w-px h-9 bg-white/[0.06] mx-0.5 self-center" />
-        <EndBtn onClick={() => room.disconnect(true)} />
+        <EndBtn onClick={handleLeaveClick} isHost={isHost} />
       </div>
 
       {/* ── Mobile compact bar ────────────────────────────────────────── */}
-      <div className="flex sm:hidden items-end gap-2 xs:gap-3 bg-[#14151c]/90 backdrop-blur-2xl border border-white/[0.08] rounded-2xl px-3 xs:px-4 py-3 shadow-[0_8px_40px_rgba(0,0,0,0.6)]">
+      <div className="flex sm:hidden items-end gap-3 bg-[#14151c]/90 backdrop-blur-2xl border border-white/[0.08] rounded-2xl px-4 py-3 shadow-[0_8px_40px_rgba(0,0,0,0.6)]">
         <Btn label={isMicrophoneEnabled ? "Mute" : "Unmute"} danger={!isMicrophoneEnabled}
           onClick={toggleMic} disabled={togglingMic} icon={isMicrophoneEnabled ? <IC.MicOn /> : <IC.MicOff />} />
         <Btn label={isCameraEnabled ? "Stop" : "Start"} danger={!isCameraEnabled}
           onClick={toggleCam} disabled={togglingCam} icon={isCameraEnabled ? <IC.CamOn /> : <IC.CamOff />} />
 
-        {/* More button — opens overlay sheet */}
         <div className="relative" ref={moreRef}>
           <Btn label="More" active={showMore} onClick={() => setShowMore((v) => !v)} icon={<IC.More />} />
           {showMore && (
@@ -250,7 +273,7 @@ export function MeetingControls({
           )}
         </div>
 
-        <EndBtn onClick={() => room.disconnect(true)} />
+        <EndBtn onClick={handleLeaveClick} isHost={isHost} />
       </div>
     </>
   );

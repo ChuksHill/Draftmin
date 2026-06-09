@@ -14,7 +14,7 @@ function initialsFromName(name: string) {
 export function PreJoinScreen({ roomName }: PreJoinScreenProps) {
   const router = useRouter();
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [stream, setStream] = useState<MediaStream | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const [cameraOn, setCameraOn] = useState(true);
   const [micOn, setMicOn] = useState(true);
   const [displayName, setDisplayName] = useState("");
@@ -43,8 +43,11 @@ export function PreJoinScreen({ roomName }: PreJoinScreenProps) {
     async function start() {
       setDeviceError(null);
       if (!cameraOn && !micOn) {
-        stream?.getTracks().forEach((t) => t.stop());
-        setStream(null);
+        // Stop existing stream
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach((t) => t.stop());
+          streamRef.current = null;
+        }
         if (videoRef.current) videoRef.current.srcObject = null;
         return;
       }
@@ -54,7 +57,7 @@ export function PreJoinScreen({ roomName }: PreJoinScreenProps) {
           .getUserMedia({ video: cameraOn, audio: micOn })
           .catch(async (err) => {
             if (!cameraOn || !micOn) throw err;
-            // try separately to isolate the failing device
+            // Try separately to isolate the failing device
             let vs: MediaStream | null = null;
             let as_: MediaStream | null = null;
             let ce: unknown = null, me: unknown = null;
@@ -76,11 +79,16 @@ export function PreJoinScreen({ roomName }: PreJoinScreenProps) {
           });
 
         if (cancelled) { next.getTracks().forEach((t) => t.stop()); return; }
-        stream?.getTracks().forEach((t) => t.stop());
-        setStream(next);
+        
+        // Stop old stream
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach((t) => t.stop());
+        }
+        streamRef.current = next;
+        
         if (videoRef.current) {
           videoRef.current.srcObject = next;
-          await videoRef.current.play().catch(() => { });
+          await videoRef.current.play().catch(() => {});
         }
       } catch (e) {
         setDeviceError(e instanceof Error ? e.message : String(e));
@@ -91,20 +99,31 @@ export function PreJoinScreen({ roomName }: PreJoinScreenProps) {
 
     void start();
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cameraOn, micOn]);
 
-  useEffect(() => () => { stream?.getTracks().forEach((t) => t.stop()); }, [stream]);
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
+    };
+  }, []);
 
   const handleJoin = () => {
     if (joining) return;
     setJoining(true);
     const safeName = displayName.trim() || "Guest";
     window.localStorage.setItem("draftmin.displayName", safeName);
-    try { stream?.getTracks().forEach((t) => t.stop()); } catch { /* ignore */ }
-    setStream(null);
+    
+    // Stop preview stream
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
     if (videoRef.current) videoRef.current.srcObject = null;
-    // ✅ Only pass `name`, mic, cam — identity is generated server-side
+    
     router.push(
       `/meeting/${encodeURIComponent(roomName)}?name=${encodeURIComponent(safeName)}&mic=${micOn ? "1" : "0"}&cam=${cameraOn ? "1" : "0"}`,
     );
@@ -189,7 +208,6 @@ export function PreJoinScreen({ roomName }: PreJoinScreenProps) {
 
               {/* Toggle controls */}
               <div className="flex flex-wrap items-center gap-2 sm:gap-3 px-4 sm:px-5 py-4 border-t border-white/5">
-                {/* Mic toggle */}
                 <button
                   type="button"
                   onClick={() => setMicOn((v) => !v)}
@@ -215,7 +233,6 @@ export function PreJoinScreen({ roomName }: PreJoinScreenProps) {
                   {micOn ? "Mic on" : "Mic off"}
                 </button>
 
-                {/* Camera toggle */}
                 <button
                   type="button"
                   onClick={() => setCameraOn((v) => !v)}
@@ -250,8 +267,6 @@ export function PreJoinScreen({ roomName }: PreJoinScreenProps) {
 
             {/* ── right panel ──────────────────────────────────────────── */}
             <div className="flex flex-col gap-4">
-
-              {/* Name & join */}
               <div className="rounded-2xl border border-white/10 bg-[#1a1d27] p-5 space-y-4">
                 <div>
                   <label className="block text-xs font-semibold text-white/50 uppercase tracking-wider mb-2">

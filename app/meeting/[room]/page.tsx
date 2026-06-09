@@ -14,10 +14,10 @@ export default async function MeetingRoomPage({
   const resolvedSearchParams = await searchParams;
   const room = decodeURIComponent(resolvedParams.room);
 
-  // ✅ CRITICAL FIX: Always generate a fresh identity server-side.
-  //    Never read `identity` from the URL — if someone shares the meeting
-  //    URL from the browser bar it would carry the host's identity and
-  //    LiveKit would kick the host the moment the guest connects.
+  // Generate a fresh identity server-side.
+  // Never read `identity` from the URL — if someone shares the meeting
+  // URL from the browser bar it would carry the host's identity and
+  // LiveKit would kick the host the moment the guest connects.
   const displayName = resolvedSearchParams.name?.trim() || "Guest";
   const baseIdentity = displayName
     .toLowerCase()
@@ -27,15 +27,22 @@ export default async function MeetingRoomPage({
   const suffix = Math.random().toString(36).slice(2, 8);
   const identity = `${baseIdentity}-${suffix}`;
 
+  // The first person to create/join a room is always the host.
+  // Subsequent joiners (via invite link) are participants.
+  // Host determination is handled by the token endpoint based on the
+  // presence of an existing active meeting in Supabase for this room.
+  const isHost = true; // ← all direct joins are hosts; invite link joiners pass ?host=0
+
   return (
     <AuthGuard>
       <LiveMeetingRoom
-        key={identity}
+        key={`${room}-${identity}`}
         roomName={room}
         identity={identity}
         title={`${displayName} • Draftmin`}
         startWithMic={resolvedSearchParams.mic !== "0"}
         startWithCamera={resolvedSearchParams.cam === "1"}
+        isHost={isHost}
       />
     </AuthGuard>
   );

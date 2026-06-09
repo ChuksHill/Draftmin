@@ -16,11 +16,10 @@ import { RoomEvent, Track } from "livekit-client";
 import { MeetingLayout } from "@/shared/components/layout/meeting-layout/MeetingLayout";
 import { MeetingHeader } from "@/shared/components/layout/meeting-layout/MeetingHeader";
 import { MeetingControls, MeetingPanel } from "@/shared/components/layout/meeting-layout/MeetingControls";
-import { createAudioPreprocessor, createRollingVAD } from "@/shared/lib/audio/audioPreprocessor";
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 type SttProvider = "deepgram" | "whisper" | "webspeech";
-type TokenResponse = { url: string; token: string; room: string; identity: string };
+type TokenResponse = { url: string; token: string; room: string; identity: string; isHost: boolean };
 
 type ToastItem = {
   id: string;
@@ -48,7 +47,7 @@ const STT_DISABLED = Boolean((process.env.NEXT_PUBLIC_STT_DISABLED ?? "").trim()
 
 export type LiveMeetingRoomProps = {
   roomName: string; identity: string; title?: string;
-  startWithMic?: boolean; startWithCamera?: boolean;
+  startWithMic?: boolean; startWithCamera?: boolean; isHost?: boolean;
 };
 
 /* ─── Helpers ────────────────────────────────────────────────────────────── */
@@ -89,15 +88,17 @@ function ToastContainer({ toasts, onDismiss }: { toasts: ToastItem[]; onDismiss:
   );
 }
 
-/* ─── Notification system (must be inside LiveKitRoom) ───────────────────── */
+/* ─── Notification system ────────────────────────────────────────────────── */
 function NotificationSystem({
   onToast,
   onDMReceived,
   localIdentity,
+  isHost,
 }: {
   onToast: (t: Omit<ToastItem, "id">) => void;
   onDMReceived: (from: string, text: string, timestamp: number) => void;
   localIdentity: string;
+  isHost: boolean;
 }) {
   const room = useRoomContext();
 
@@ -117,6 +118,11 @@ function NotificationSystem({
           onDMReceived(data.from, data.text, data.timestamp ?? Date.now());
           onToast({ type: "chat", title: `DM from ${identityToDisplay(data.from)}`, body: data.text.slice(0, 60) });
         }
+        // Listen for host ending meeting
+        if (data.type === "end-meeting" && data.from !== localIdentity) {
+          onToast({ type: "info", title: "Meeting ended by host", body: "The host has ended the meeting for everyone." });
+          setTimeout(() => room.disconnect(true), 3000);
+        }
       } catch { /* ignore */ }
     };
 
@@ -128,7 +134,7 @@ function NotificationSystem({
       room.off(RoomEvent.ParticipantDisconnected, onLeave);
       room.off(RoomEvent.DataReceived, onData);
     };
-  }, [room, localIdentity, onToast, onDMReceived]);
+  }, [room, localIdentity, onToast, onDMReceived, isHost]);
 
   return null;
 }
@@ -153,7 +159,7 @@ function ParticipantTile({ trackRef, onClick }: { trackRef: any; onClick?: () =>
       ].join(" ")}
     >
       {isCamOn && trackRef.publication?.track ? (
-        <VideoTrack trackRef={trackRef as any} className="h-full w-full object-cover" />
+        <VideoTrack trackRef={trackRef as any} className="h-full w-full object-cover scale-x-[-1]" />
       ) : (
         <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-[#1c1f2e] to-[#0e0f15]">
           <div className={`h-16 w-16 rounded-2xl flex items-center justify-center text-xl font-semibold transition-all ${isSpeaking ? "bg-violet-600/25 text-violet-200 ring-1 ring-violet-500/40" : "bg-white/[0.07] text-white/60 ring-1 ring-white/[0.08]"}`}>
@@ -255,7 +261,7 @@ function MeetingStage({
   );
 }
 
-/* ─── Chat view (general + DM) ───────────────────────────────────────────── */
+/* ─── Chat view ───────────────────────────────────────────────────────────── */
 function ChatView({
   dmTarget, dmMessages, onSendDM, meetingId, onClose,
 }: {
@@ -296,7 +302,8 @@ function ChatView({
 
       if (tab === "dm" && dmTarget) {
         const text = msg || `Shared: ${attachmentInfo?.name ?? "file"}`;
-        onSendDM(dmTarget, text);
+        const payload = { text, attachment: attachmentInfo };
+        onSendDM(dmTarget, JSON.stringify(payload));
       } else {
         const payload = attachmentInfo
           ? JSON.stringify({ text: msg || `Shared: ${attachmentInfo.name}`, attachment: attachmentInfo })
@@ -323,7 +330,13 @@ function ChatView({
   const renderMessage = (msg: any, key: string | number) => {
     let text = msg.message ?? msg.text ?? "";
     let attachment: any = null;
-    try { if (text.startsWith("{")) { const p = JSON.parse(text); text = p.text; attachment = p.attachment; } } catch { /* ignore */ }
+    try { 
+      if (text.startsWith("{")) { 
+        const p = JSON.parse(text); 
+        text = p.text; 
+        attachment = p.attachment; 
+      } 
+    } catch { /* ignore */ }
     const isOwn = msg.from?.isLocal ?? msg.from === identity;
     const senderName = msg.from?.isLocal ? "You" : identityToDisplay(msg.from?.identity ?? msg.from ?? "Unknown");
     const isImg = attachment?.type?.startsWith("image/");
@@ -358,7 +371,6 @@ function ChatView({
 
   return (
     <div className="h-full flex flex-col">
-      {/* Tab bar */}
       <div className="flex border-b border-white/[0.06] shrink-0">
         <button type="button" onClick={() => setTab("everyone")}
           className={`flex-1 py-2.5 text-xs font-medium transition ${tab === "everyone" ? "text-white border-b-2 border-blue-500" : "text-white/40 hover:text-white/70"}`}>
@@ -372,7 +384,6 @@ function ChatView({
         )}
       </div>
 
-      {/* Messages */}
       <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-0">
         {tab === "everyone" ? (
           chatMessages.length === 0
@@ -386,7 +397,6 @@ function ChatView({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input */}
       <div className="border-t border-white/[0.06] p-3 space-y-2 shrink-0">
         {selectedFile && (
           <div className="flex items-center justify-between gap-2 rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-2">
@@ -536,7 +546,7 @@ function SidePanel({
   );
 }
 
-/* ─── STT controller ─────────────────────────────────────────────────────── */
+/* ─── STT controller (fixed race conditions) ─────────────────────────────── */
 type STTProps = {
   sttDisabled: boolean; sttLang: string; sttChunkMs: number;
   speechRecognitionAvailable: boolean; sttProviderOrder: SttProvider[];
@@ -550,12 +560,11 @@ function RoomTranscriptionController({ sttDisabled, sttLang, sttChunkMs, speechR
   const room = useRoomContext();
   const identity = localParticipant?.identity ?? "Guest";
   const recRef = useRef<any>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
-  const queueRef = useRef<Promise<void>>(Promise.resolve());
   const activeProviderRef = useRef<SttProvider | null>(null);
-  // Tighter dedup window (4 s) — only blocks true Whisper hallucination loops,
-  // not legitimate repeated short phrases.
-  const lastFinalRef = useRef<{ norm: string; at: number } | null>(null);
+  const cancelledRef = useRef(false);
+  const processingQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   const broadcast = useCallback((text: string) => {
     if (!localParticipant) return;
@@ -566,20 +575,18 @@ function RoomTranscriptionController({ sttDisabled, sttLang, sttChunkMs, speechR
   }, [localParticipant]);
 
   const finalize = useCallback((text: string) => {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-    const norm = trimmed.toLowerCase().replace(/\s+/g, " ").trim();
-    const last = lastFinalRef.current;
-    const now = Date.now();
-    // 4 s dedup window — tight enough to allow real repeated speech
-    if (last && last.norm === norm && now - last.at < 4_000) return;
-    lastFinalRef.current = { norm, at: now };
+    if (!text.trim() || cancelledRef.current) return;
     const display = identityToDisplay(identity);
-    const line = `${display}: ${trimmed}`;
+    const line = `${display}: ${text}`;
     onCaptionsChange((c) => [...c, line]);
-    broadcast(trimmed);
+    broadcast(text);
+    // Save to Supabase immediately for persistence
     if (meetingId) {
-      void supabase.from("transcripts").insert({ meeting_id: meetingId, speaker_name: display, transcript_text: trimmed });
+      void supabase.from("transcripts").insert({ 
+        meeting_id: meetingId, 
+        speaker_name: display, 
+        transcript_text: text 
+      });
     }
   }, [identity, onCaptionsChange, broadcast, meetingId]);
 
@@ -587,6 +594,7 @@ function RoomTranscriptionController({ sttDisabled, sttLang, sttChunkMs, speechR
   useEffect(() => {
     if (!room) return;
     const handler = (payload: Uint8Array) => {
+      if (cancelledRef.current) return;
       try {
         const d = JSON.parse(new TextDecoder().decode(payload));
         if (d.type === "caption" && d.sender !== identity) {
@@ -601,264 +609,222 @@ function RoomTranscriptionController({ sttDisabled, sttLang, sttChunkMs, speechR
 
   useEffect(() => {
     if (sttDisabled || !isMicrophoneEnabled) { onInterimChange(""); return; }
-    let cancelled = false;
+    cancelledRef.current = false;
 
-    // ── WebSpeech cleanup ────────────────────────────────────────────────────
-    const stopWS = () => {
+    const stopAll = () => {
+      // Stop Web Speech
       const r = recRef.current; recRef.current = null;
-      if (!r) return;
-      try { r.onresult = null; r.onend = null; r.onerror = null; r.abort?.(); } catch { /* ignore */ }
-    };
-
-    // ── MediaRecorder cleanup ────────────────────────────────────────────────
-    const stopMR = () => {
+      if (r) {
+        r.onresult = undefined;
+        r.onend = undefined;
+        r.onerror = undefined;
+        try { r.stop(); } catch { /* ignore */ }
+      }
+      // Stop MediaRecorder
       const rec = recorderRef.current; recorderRef.current = null;
-      try { if (rec && rec.state !== "inactive") rec.stop(); } catch { /* ignore */ }
+      if (rec && rec.state !== "inactive") {
+        rec.ondataavailable = null;
+        try { rec.stop(); } catch { /* ignore */ }
+      }
+      // Stop stream
+      const s = streamRef.current; streamRef.current = null;
+      if (s) {
+        try { s.getTracks().forEach((t) => t.stop()); } catch { /* ignore */ }
+      }
     };
 
-    let currentIndex = 0;
+    let currentProviderIndex = 0;
     let currentStop: (() => void) | null = null;
-    let activate: (idx: number) => Promise<void>;
 
-    // ── WebSpeech provider ───────────────────────────────────────────────────
     const startWS = (): (() => void) => {
       const win = window as any;
       const SR = win.SpeechRecognition ?? win.webkitSpeechRecognition;
       if (!SR) throw new Error("Browser speech recognition unavailable.");
-
-      let restartTimer: ReturnType<typeof setTimeout> | null = null;
-
       const r = new SR();
-      r.continuous = true;
-      r.interimResults = true;
-      r.lang = sttLang;
-      r.maxAlternatives = 1;
-
+      r.continuous = true; r.interimResults = true; r.lang = sttLang; r.maxAlternatives = 1;
       r.onresult = (e: any) => {
+        if (cancelledRef.current) return;
         let interim = "";
         const finals: string[] = [];
         for (let i = e.resultIndex; i < e.results.length; i++) {
           const t = e.results[i][0]?.transcript?.trim();
           if (!t) continue;
-          if (e.results[i].isFinal) finals.push(t);
-          else interim = t;
+          if (e.results[i].isFinal) finals.push(t); else interim = t;
         }
         if (interim) onInterimChange(interim);
         if (finals.length) { finals.forEach(finalize); onInterimChange(""); }
       };
-
-      r.onerror = (e: any) => {
-        // "no-speech" is normal during silence — don't surface as an error
-        if (e.error === "no-speech") return;
-        onErrorChange(e.error ?? "STT error");
+      r.onerror = (e: any) => { 
+        if (cancelledRef.current) return;
+        // Don't show error for intentional stops
+        if (e.error !== "aborted") {
+          onErrorChange(e.error ?? "STT error"); 
+        }
       };
-
-      r.onend = () => {
-        if (!recRef.current || cancelled) return;
-        // Debounce restart to avoid rapid-fire loops on mobile
-        restartTimer = setTimeout(() => {
-          if (!recRef.current || cancelled) return;
-          try { r.start(); } catch { /* ignore */ }
-        }, 300);
+      r.onend = () => { 
+        if (cancelledRef.current || !recRef.current) return; 
+        try { r.start(); } catch { /* ignore */ } 
       };
-
-      r.start();
-      recRef.current = r;
-
+      r.start(); recRef.current = r;
       return () => {
-        if (restartTimer) clearTimeout(restartTimer);
-        stopWS();
+        recRef.current = null;
+        r.onresult = undefined;
+        r.onend = undefined;
+        r.onerror = undefined;
+        try { r.stop(); } catch { /* ignore */ }
       };
     };
 
-    // ── Whisper / Deepgram chunk sender ──────────────────────────────────────
     const transcribeChunk = async (provider: "deepgram" | "whisper", blob: Blob) => {
-      const res = await fetch("/api/stt", {
-        method: "POST",
-        headers: {
-          "x-stt-provider": provider,
-          "x-stt-lang": sttLang,
-          // Send the real MIME type so the server names the file correctly
-          "content-type": blob.type || "audio/webm",
-        },
-        body: blob,
+      const res = await fetch("/api/stt", { 
+        method: "POST", 
+        headers: { 
+          "x-stt-provider": provider, 
+          "x-stt-lang": sttLang, 
+          "content-type": blob.type || "audio/webm" 
+        }, 
+        body: blob 
       });
       if (!res.ok) {
         const bodyText = await res.text().catch(() => "");
-        let msg = bodyText;
-        try { msg = (JSON.parse(bodyText) as any)?.error || bodyText; } catch { /* ignore */ }
-        throw new Error(msg || `STT ${res.status}`);
+        try {
+          const parsed = JSON.parse(bodyText) as { error?: string; errors?: Array<{ provider?: string; message?: string }> };
+          if (parsed?.errors?.length) {
+            const details = parsed.errors.map((e) => `${e.provider ?? "provider"}: ${e.message ?? "unknown error"}`).join(" | ");
+            throw new Error(details);
+          }
+          throw new Error(parsed?.error || bodyText || `STT ${res.status}`);
+        } catch {
+          throw new Error(bodyText || `STT ${res.status}`);
+        }
       }
       const d = await res.json() as { text?: string; error?: string };
       if (d.error) throw new Error(d.error);
       return (d.text ?? "").trim();
     };
 
-    // ── Server-side STT (Whisper / Deepgram) ────────────────────────────────
     const startServerSTT = async (provider: "deepgram" | "whisper"): Promise<() => void> => {
+      if (!navigator.mediaDevices?.getUserMedia) throw new Error("getUserMedia not supported.");
       if (typeof MediaRecorder === "undefined") throw new Error("MediaRecorder not supported.");
-
-      // ── FIX 1: Reuse LiveKit's existing mic track instead of a second getUserMedia ──
-      // Opening a second getUserMedia while LiveKit holds the mic causes AGC
-      // conflicts on Android and fails silently on iOS.
-      let rawStream: MediaStream | null = null;
-      const livekitTrack = localParticipant?.getTrackPublication(Track.Source.Microphone)?.track;
-
-      if (livekitTrack?.mediaStream) {
-        rawStream = livekitTrack.mediaStream;
-        console.log("[stt] reusing LiveKit mic track");
-      } else {
-        // Fallback: open our own stream if LiveKit track isn't available yet
-        if (!navigator.mediaDevices?.getUserMedia) throw new Error("getUserMedia not supported.");
-        rawStream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-            sampleRate: { ideal: 16_000 },
-            channelCount: { ideal: 1 },
-          },
-        });
-        console.log("[stt] opened fallback mic stream");
-      }
-
-      if (cancelled) {
-        // Only stop tracks we opened ourselves, never LiveKit's
-        if (!livekitTrack?.mediaStream) rawStream?.getTracks().forEach((t) => t.stop());
-        throw new Error("Cancelled");
-      }
-
-      // ── FIX 2: Run stream through Web Audio with AudioContext.resume() ────
-      let preprocessor: Awaited<ReturnType<typeof createAudioPreprocessor>> | null = null;
-      let recordStream: MediaStream = rawStream;
-
-      try {
-        preprocessor = await createAudioPreprocessor(rawStream);
-        // FIX 2a: Ensure AudioContext is running (suspended by default on mobile)
-        await preprocessor.resume();
-        recordStream = preprocessor.processedStream;
-      } catch (e) {
-        console.warn("[stt] preprocessing unavailable, recording raw:", e);
-      }
-
-      // ── FIX 3: Choose the best supported MIME; include audio/mp4 for iOS ──
-      const MIME_CANDIDATES = [
-        "audio/webm;codecs=opus",
-        "audio/webm",
-        "audio/ogg;codecs=opus",
-        "audio/mp4",          // iOS Safari / Android fallback
-      ];
-      const mime = MIME_CANDIDATES.find((t) => MediaRecorder.isTypeSupported(t)) ?? "";
-      console.log("[stt] MediaRecorder mime:", mime || "(browser default)");
-
-      const recorder = new MediaRecorder(
-        recordStream,
-        mime ? { mimeType: mime, audioBitsPerSecond: 32_000 } : undefined
-      );
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (cancelledRef.current) { stream.getTracks().forEach((t) => t.stop()); throw new Error("Cancelled"); }
+      streamRef.current = stream;
+      const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"].find((t) => MediaRecorder.isTypeSupported(t));
+      const recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
       recorderRef.current = recorder;
-
+      
       const failures = { count: 0 };
       const MAX_FAILURES = 3;
 
-      // ── FIX 4: Rolling VAD — poll every 80 ms, consume flag per chunk ─────
-      // End-of-chunk snapshots miss speech that finished before the chunk
-      // boundary. Rolling polling catches it reliably.
-      const vad = preprocessor
-        ? createRollingVAD(preprocessor.analyser, { pollMs: 80, threshold: 0.008 })
-        : null;
-
       recorder.ondataavailable = (e) => {
-        if (!e.data?.size || e.data.size < 800) return;
-
-        // ── FIX 5: Use rolling VAD result, not a single end-of-chunk sample ─
-        if (vad && !vad.consumeSpeechDetected()) {
-          console.log("[stt] VAD: silent chunk skipped");
-          return;
-        }
-
-        const blob = e.data;
-
-        queueRef.current = queueRef.current.then(async () => {
-          if (cancelled || activeProviderRef.current !== provider) return;
+        if (!e.data?.size || cancelledRef.current) return;
+        const chunkBlob = e.data;
+        processingQueueRef.current = processingQueueRef.current.then(async () => {
+          if (cancelledRef.current || activeProviderRef.current !== provider) return;
           try {
-            const text = await transcribeChunk(provider, blob);
-            if (text) { finalize(text); onInterimChange(""); failures.count = 0; }
+            const text = await transcribeChunk(provider, chunkBlob);
+            if (text && !cancelledRef.current) { 
+              finalize(text); 
+              onInterimChange(""); 
+              failures.count = 0; 
+            }
           } catch (err) {
+            if (cancelledRef.current) return;
             failures.count++;
-            console.warn("[stt] chunk error:", err);
             onErrorChange(err instanceof Error ? err.message : String(err));
             if (failures.count >= MAX_FAILURES) {
               failures.count = 0;
-              void activate(currentIndex + 1);
+              // Schedule fallback on next tick to avoid nesting
+              setTimeout(() => {
+                if (!cancelledRef.current) activate(currentProviderIndex + 1);
+              }, 0);
             }
           }
         });
       };
 
-      // ── FIX 6: Use timeslice instead of stop()/start() interval ──────────
-      // timeslice is the standard, race-free way to get periodic chunks.
-      // stop()/start() has an async gap where ondataavailable fires AFTER
-      // stop() but start() is already called — throws InvalidStateError on
-      // Android and silently drops chunks on desktop.
-      const CHUNK_MS = Math.min(sttChunkMs, 2_500);
-      recorder.start(CHUNK_MS);
+      recorder.start();
+      const id = setInterval(() => {
+        if (cancelledRef.current) { clearInterval(id); return; }
+        try { 
+          if (recorder.state === "recording") { 
+            recorder.requestData(); 
+          } 
+        } catch { /* ignore */ }
+      }, sttChunkMs);
 
-      const ownedStream = livekitTrack?.mediaStream ? null : rawStream;
-
-      return () => {
-        vad?.stop();
-        try { if (recorder.state !== "inactive") recorder.stop(); } catch { /* ignore */ }
+      return () => { 
+        clearInterval(id); 
         recorderRef.current = null;
-        preprocessor?.cleanup();
-        // Only stop tracks we opened ourselves
-        ownedStream?.getTracks().forEach((t) => t.stop());
+        recorder.ondataavailable = null;
+        try { if (recorder.state !== "inactive") recorder.stop(); } catch { /* ignore */ }
+        const s = streamRef.current;
+        if (s) { streamRef.current = null; try { s.getTracks().forEach((t) => t.stop()); } catch { /* ignore */ } }
       };
     };
 
     const supports = (p: SttProvider) =>
-      p === "webspeech"
-        ? speechRecognitionAvailable
-        : typeof MediaRecorder !== "undefined";
+      p === "webspeech" ? speechRecognitionAvailable
+      : typeof navigator.mediaDevices?.getUserMedia === "function" && typeof MediaRecorder !== "undefined";
 
-    activate = async (idx: number) => {
-      currentStop?.(); currentStop = null; activeProviderRef.current = null;
-      onErrorChange(null); onInterimChange("");
+    const activate = async (idx: number) => {
+      if (cancelledRef.current) return;
+      currentStop?.(); 
+      currentStop = null; 
+      activeProviderRef.current = null;
+      onErrorChange(null); 
+      onInterimChange("");
+      
       for (let i = idx; i < sttProviderOrder.length; i++) {
+        if (cancelledRef.current) return;
         const p = sttProviderOrder[i];
         if (!supports(p)) continue;
         try {
-          const stop = p === "webspeech"
-            ? (stopMR(), startWS())
-            : await startServerSTT(p as "deepgram" | "whisper");
-          if (cancelled) { stop(); return; }
-          currentStop = stop; currentIndex = i; activeProviderRef.current = p;
-          console.log("[stt] active provider:", p);
+          const stop = p === "webspeech" ? (() => { stopServerSTT(); return startWS(); })() : await startServerSTT(p as "deepgram" | "whisper");
+          if (cancelledRef.current) { stop(); return; }
+          currentStop = stop; 
+          currentProviderIndex = i; 
+          activeProviderRef.current = p; 
           return;
         } catch (e) {
-          console.warn("[stt] provider failed:", p, e);
+          if (cancelledRef.current) return;
           onErrorChange(e instanceof Error ? e.message : String(e));
         }
       }
-      onErrorChange("No STT provider available. Check mic permissions.");
+      if (!cancelledRef.current) {
+        onErrorChange("No STT provider available. Check mic permissions.");
+      }
+    };
+
+    const stopServerSTT = () => {
+      const rec = recorderRef.current; recorderRef.current = null;
+      if (rec) {
+        rec.ondataavailable = null;
+        try { if (rec.state !== "inactive") rec.stop(); } catch { /* ignore */ }
+      }
+      const s = streamRef.current; streamRef.current = null;
+      if (s) {
+        try { s.getTracks().forEach((t) => t.stop()); } catch { /* ignore */ }
+      }
     };
 
     void activate(0);
-    // Retry primary provider every 60 s if we fell back to a secondary
-    const retryId = setInterval(() => { if (!cancelled && currentIndex > 0) void activate(0); }, 60_000);
+    const retryId = setInterval(() => { 
+      if (!cancelledRef.current && currentProviderIndex > 0) void activate(0); 
+    }, 60_000);
 
     return () => {
-      cancelled = true;
+      cancelledRef.current = true;
       clearInterval(retryId);
       currentStop?.();
-      stopWS();
-      stopMR();
+      stopAll();
     };
-  }, [speechRecognitionAvailable, sttChunkMs, sttDisabled, sttLang, sttProviderOrder, isMicrophoneEnabled, finalize, localParticipant]);
+  }, [speechRecognitionAvailable, sttChunkMs, sttDisabled, sttLang, sttProviderOrder, isMicrophoneEnabled, finalize, onErrorChange, onInterimChange]);
 
   return null;
 }
 
-/* ─── Markdown renderer (unchanged) ─────────────────────────────────────── */
+/* ─── Markdown renderer ──────────────────────────────────────────────────── */
 function parseBold(text: string) {
   return text.split(/(\*\*.*?\*\*)/g).map((part, i) =>
     part.startsWith("**") && part.endsWith("**")
@@ -866,6 +832,7 @@ function parseBold(text: string) {
       : part
   );
 }
+
 function MarkdownRenderer({ text }: { text: string }) {
   return (
     <div className="space-y-3 text-slate-200">
@@ -891,8 +858,8 @@ function MarkdownRenderer({ text }: { text: string }) {
 }
 
 /* ─── Meeting summary dashboard ──────────────────────────────────────────── */
-function MeetingSummaryDashboard({ captions, roomName, onClose, meetingId }: {
-  captions: string[]; roomName: string; onClose: () => void; meetingId: string | null;
+function MeetingSummaryDashboard({ captions, roomName, onClose, meetingId, isHost }: {
+  captions: string[]; roomName: string; onClose: () => void; meetingId: string | null; isHost: boolean;
 }) {
   const [summaryText, setSummaryText] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -903,7 +870,6 @@ function MeetingSummaryDashboard({ captions, roomName, onClose, meetingId }: {
   const saveSummaryToSupabase = useCallback(async (minutes: string) => {
     if (!meetingId || saved) return;
     try {
-      // Check if a summary already exists
       const { data: existing } = await supabase
         .from("meeting_summaries")
         .select("id")
@@ -914,7 +880,12 @@ function MeetingSummaryDashboard({ captions, roomName, onClose, meetingId }: {
 
       const { data: summaryData, error: se } = await supabase
         .from("meeting_summaries")
-        .insert({ meeting_id: meetingId, markdown_content: minutes, executive_summary: "AI Generated", key_decisions: [] })
+        .insert({ 
+          meeting_id: meetingId, 
+          markdown_content: minutes, 
+          executive_summary: "AI Generated", 
+          key_decisions: [] 
+        })
         .select("id")
         .single();
 
@@ -924,9 +895,21 @@ function MeetingSummaryDashboard({ captions, roomName, onClose, meetingId }: {
       if (summaryData) {
         const actionItems = minutes.split("\n").reduce<any[]>((acc, line) => {
           const m = line.trim().match(/^\|\s*\d+\s*\|\s*([^|]+)\|\s*([^|]+)\|\s*([^|]+)\|\s*([^|]+)\|/);
-          if (m) acc.push({ summary_id: summaryData.id, task: m[1].trim(), assignee: m[2].trim() || "Unassigned", priority: m[4].trim() || "Medium", is_completed: false });
+          if (m) acc.push({ 
+            summary_id: summaryData.id, 
+            task: m[1].trim(), 
+            assignee: m[2].trim() || "Unassigned", 
+            priority: m[4].trim() || "Medium", 
+            is_completed: false 
+          });
           const cb = line.trim().match(/^-\s+\[([ xX])\]\s+(.*)/);
-          if (cb) acc.push({ summary_id: summaryData.id, task: cb[2].trim(), assignee: "Unassigned", priority: "Medium", is_completed: cb[1].toLowerCase() === "x" });
+          if (cb) acc.push({ 
+            summary_id: summaryData.id, 
+            task: cb[2].trim(), 
+            assignee: "Unassigned", 
+            priority: "Medium", 
+            is_completed: cb[1].toLowerCase() === "x" 
+          });
           return acc;
         }, []);
 
@@ -943,6 +926,7 @@ function MeetingSummaryDashboard({ captions, roomName, onClose, meetingId }: {
     setIsGenerating(true); setError(null);
     try {
       if (!captions.length) { setError("No transcript to summarise. Enable captions during your next meeting."); return; }
+      
       if (meetingId) {
         const { data: existing, error: fetchErr } = await supabase
           .from("meeting_summaries")
@@ -956,7 +940,18 @@ function MeetingSummaryDashboard({ captions, roomName, onClose, meetingId }: {
           return;
         }
       }
-      const res = await fetch("/api/summary", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ transcript: captions }) });
+      
+      const res = await fetch("/api/summary", { 
+        method: "POST", 
+        headers: { "Content-Type": "application/json" }, 
+        body: JSON.stringify({ 
+          transcript: captions,
+          meetingContext: {
+            language: process.env.NEXT_PUBLIC_MEETING_LANGUAGE || undefined,
+            region: process.env.NEXT_PUBLIC_MEETING_REGION || undefined,
+          }
+        }) 
+      });
       if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error((d as any).error || `${res.status}`); }
       const d = await res.json() as { minutes: string };
       setSummaryText(d.minutes);
@@ -979,6 +974,11 @@ function MeetingSummaryDashboard({ captions, roomName, onClose, meetingId }: {
         </div>
         <div className="flex items-center gap-2">
           {saved && <span className="text-xs text-emerald-400 hidden sm:inline">✓ Saved to Supabase</span>}
+          {isHost && (
+            <span className="text-xs text-blue-400 bg-blue-500/10 border border-blue-500/20 rounded-full px-2 py-0.5 hidden sm:inline">
+              Host
+            </span>
+          )}
           <button onClick={onClose} className="h-9 rounded-xl border border-white/[0.08] bg-white/5 px-4 text-xs font-medium text-white/60 hover:text-white hover:bg-white/10 transition">
             ← Home
           </button>
@@ -986,7 +986,6 @@ function MeetingSummaryDashboard({ captions, roomName, onClose, meetingId }: {
       </header>
 
       <main className="flex-1 min-h-0 flex flex-col lg:flex-row p-4 sm:p-6 gap-4 sm:gap-6 overflow-auto">
-        {/* Summary */}
         <section className="flex-1 flex flex-col min-w-0 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-5 min-h-[400px] lg:min-h-0">
           <div className="flex items-center justify-between pb-4 border-b border-white/[0.06] shrink-0 gap-3">
             <div className="min-w-0">
@@ -1027,7 +1026,6 @@ function MeetingSummaryDashboard({ captions, roomName, onClose, meetingId }: {
           </div>
         </section>
 
-        {/* Sidebar */}
         <aside className="flex flex-col gap-4 lg:w-64 shrink-0">
           <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-5">
             <h3 className="text-xs font-semibold text-white/50 uppercase tracking-wider mb-3">Meeting info</h3>
@@ -1035,6 +1033,7 @@ function MeetingSummaryDashboard({ captions, roomName, onClose, meetingId }: {
               <div className="flex justify-between gap-2"><span className="text-white/40">Transcript blocks</span><span className="text-white/70 font-mono">{captions.length}</span></div>
               <div className="flex justify-between gap-2"><span className="text-white/40">Saved</span><span className={captions.length && meetingId ? "text-emerald-400" : "text-white/30"}>{captions.length && meetingId ? "Yes" : "No"}</span></div>
               <div className="flex justify-between gap-2"><span className="text-white/40">Date</span><span className="text-white/70">{new Date().toLocaleDateString()}</span></div>
+              <div className="flex justify-between gap-2"><span className="text-white/40">Role</span><span className="text-white/70">{isHost ? "Host" : "Participant"}</span></div>
             </div>
           </div>
           <div className="flex-1 min-h-[200px] rounded-2xl border border-white/[0.06] bg-white/[0.02] p-5 flex flex-col">
@@ -1055,18 +1054,8 @@ function MeetingSummaryDashboard({ captions, roomName, onClose, meetingId }: {
   );
 }
 
-function RoomDisconnectionListener({ onDisconnect }: { onDisconnect: () => void }) {
-  const room = useRoomContext();
-  useEffect(() => {
-    if (!room) return;
-    room.on(RoomEvent.Disconnected, onDisconnect);
-    return () => { room.off(RoomEvent.Disconnected, onDisconnect); };
-  }, [room, onDisconnect]);
-  return null;
-}
-
 /* ─── Supabase meeting helper ────────────────────────────────────────────── */
-async function ensureMeeting(roomName: string): Promise<string | null> {
+async function ensureMeeting(roomName: string, hostIdentity: string): Promise<string | null> {
   try {
     const { data: { user }, error: userErr } = await supabase.auth.getUser();
     if (userErr) console.warn("ensureMeeting getUser error:", userErr);
@@ -1074,15 +1063,27 @@ async function ensureMeeting(roomName: string): Promise<string | null> {
 
     const { data: existing } = await supabase
       .from("meetings")
-      .select("id")
+      .select("id, host_identity")
       .eq("room_name", roomName)
       .maybeSingle();
 
-    if (existing?.id) return existing.id;
+    if (existing?.id) {
+      // Update host if needed
+      if (!existing.host_identity || existing.host_identity !== hostIdentity) {
+        await supabase.from("meetings").update({ host_identity: hostIdentity }).eq("id", existing.id);
+      }
+      return existing.id;
+    }
 
     const { data: created, error } = await supabase
       .from("meetings")
-      .insert({ room_name: roomName, title: roomName, host_id: hostId })
+      .insert({ 
+        room_name: roomName, 
+        title: roomName, 
+        host_id: hostId,
+        host_identity: hostIdentity,
+        status: "active"
+      })
       .select("id")
       .single();
 
@@ -1094,13 +1095,53 @@ async function ensureMeeting(roomName: string): Promise<string | null> {
   }
 }
 
+/* ─── Error Boundary Component ───────────────────────────────────────────── */
+class ErrorBoundary extends React.Component<{ children: React.ReactNode; fallback?: React.ReactNode }> {
+  state = { hasError: false, error: null as Error | null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback || (
+        <div className="h-screen w-full bg-[#09090e] flex items-center justify-center">
+          <div className="max-w-md rounded-2xl border border-red-500/20 bg-red-500/5 p-8 text-center">
+            <p className="font-semibold text-white">Something went wrong</p>
+            <p className="mt-2 text-sm text-white/40">{this.state.error?.message || "Unknown error"}</p>
+            <button 
+              onClick={() => this.setState({ hasError: false, error: null })}
+              className="mt-4 h-10 rounded-xl bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-500 transition"
+            >
+              Try again
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 /* ─── Main export ────────────────────────────────────────────────────────── */
-export function LiveMeetingRoom({ roomName, identity, title = "Meeting", startWithMic = true, startWithCamera = false }: LiveMeetingRoomProps) {
+function formatLiveKitConnectionError(error: Error) {
+  const message = error.message || "LiveKit connection failed.";
+  if (/401|unauthori[sz]ed|authorization|not allowed|invalid token|permission/i.test(message)) {
+    return "LiveKit rejected the join token. Check that LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET all belong to the same LiveKit Cloud project.";
+  }
+  return message;
+}
+
+export function LiveMeetingRoom({ roomName, identity, title = "Meeting", startWithMic = true, startWithCamera = false, isHost = false }: LiveMeetingRoomProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasJoinedRoomRef = useRef(false);
+  const toastTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   const [tokenData, setTokenData] = useState<TokenResponse | null>(null);
   const [tokenError, setTokenError] = useState<string | null>(null);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
   const [deviceError, setDeviceError] = useState<string | null>(null);
   const [activePanel, setActivePanel] = useState<MeetingPanel>(null);
   const [captions, setCaptions] = useState<string[]>([]);
@@ -1115,14 +1156,30 @@ export function LiveMeetingRoom({ roomName, identity, title = "Meeting", startWi
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [dmMessages, setDmMessages] = useState<Record<string, DMMessage[]>>({});
   const [dmTarget, setDmTarget] = useState<string | null>(null);
+  const [meetingEndedByHost, setMeetingEndedByHost] = useState(false);
 
   const addToast = useCallback((t: Omit<ToastItem, "id">) => {
     const id = Math.random().toString(36).slice(2);
     setToasts((prev) => [...prev.slice(-4), { ...t, id }]);
-    setTimeout(() => setToasts((prev) => prev.filter((x) => x.id !== id)), 4500);
+    const timer = setTimeout(() => {
+      setToasts((prev) => prev.filter((x) => x.id !== id));
+      toastTimersRef.current.delete(id);
+    }, 4500);
+    toastTimersRef.current.set(id, timer);
   }, []);
 
-  const dismissToast = useCallback((id: string) => setToasts((prev) => prev.filter((x) => x.id !== id)), []);
+  // Cleanup toast timers on unmount
+  useEffect(() => {
+    return () => {
+      toastTimersRef.current.forEach((timer) => clearTimeout(timer));
+    };
+  }, []);
+
+  const dismissToast = useCallback((id: string) => {
+    const timer = toastTimersRef.current.get(id);
+    if (timer) { clearTimeout(timer); toastTimersRef.current.delete(id); }
+    setToasts((prev) => prev.filter((x) => x.id !== id));
+  }, []);
 
   const handleDMReceived = useCallback((from: string, text: string, timestamp: number) => {
     setDmMessages((prev) => ({
@@ -1153,7 +1210,7 @@ export function LiveMeetingRoom({ roomName, identity, title = "Meeting", startWi
   useEffect(() => { revealControls(); return () => { if (hideTimerRef.current) clearTimeout(hideTimerRef.current); }; }, []);
 
   /* Meeting sync */
-  useEffect(() => { void ensureMeeting(roomName).then(setMeetingId); }, [roomName]);
+  useEffect(() => { void ensureMeeting(roomName, identity).then(setMeetingId); }, [roomName, identity]);
 
   /* DM sender */
   const [dmLocalParticipant, setDmLocalParticipant] = useState<any>(null);
@@ -1168,21 +1225,90 @@ export function LiveMeetingRoom({ roomName, identity, title = "Meeting", startWi
     }));
   }, [dmLocalParticipant]);
 
+  /* Host end meeting */
+  const endMeeting = useCallback(() => {
+    if (!isHost || !dmLocalParticipant) return;
+    // Broadcast end meeting to all participants
+    const payload = JSON.stringify({ type: "end-meeting", from: identity, timestamp: Date.now() });
+    try { void dmLocalParticipant.publishData(new TextEncoder().encode(payload), { reliable: true, topic: "meeting-control" }); }
+    catch { /* ignore */ }
+    setShowSummary(true);
+  }, [isHost, dmLocalParticipant, identity]);
+
+  const handleLeave = useCallback(() => {
+    if (isHost) {
+      endMeeting();
+    } else {
+      setShowSummary(true);
+    }
+  }, [isHost, endMeeting]);
+
+  const handleLiveKitConnected = useCallback(() => {
+    hasJoinedRoomRef.current = true;
+    setConnectionError(null);
+  }, []);
+
+  const handleLiveKitDisconnected = useCallback(() => {
+    if (hasJoinedRoomRef.current) setShowSummary(true);
+  }, []);
+
+  const handleLiveKitError = useCallback((error: Error) => {
+    const message = formatLiveKitConnectionError(error);
+    if (!hasJoinedRoomRef.current) {
+      setConnectionError(message);
+      return;
+    }
+    addToast({ type: "error", title: "LiveKit connection issue", body: message });
+  }, [addToast]);
+
+  // Listen for host ending meeting
+  useEffect(() => {
+    if (isHost || !dmLocalParticipant) return;
+    const room = dmLocalParticipant.room;
+    if (!room) return;
+    
+    const handler = (payload: Uint8Array) => {
+      try {
+        const data = JSON.parse(new TextDecoder().decode(payload));
+        if (data.type === "end-meeting" && data.from !== identity) {
+          setMeetingEndedByHost(true);
+          addToast({ type: "info", title: "Meeting ended by host", body: "The host has ended the meeting." });
+          setTimeout(() => setShowSummary(true), 3000);
+        }
+      } catch { /* ignore */ }
+    };
+    
+    room.on(RoomEvent.DataReceived, handler);
+    return () => { room.off(RoomEvent.DataReceived, handler); };
+  }, [isHost, dmLocalParticipant, identity, addToast]);
+
   /* Token fetch */
   useEffect(() => {
     const controller = new AbortController();
-    fetch(`/api/livekit/token?room=${encodeURIComponent(roomName)}&identity=${encodeURIComponent(identity)}`, { signal: controller.signal })
+    hasJoinedRoomRef.current = false;
+    setTokenData(null);
+    setTokenError(null);
+    setConnectionError(null);
+    fetch(`/api/livekit/token?room=${encodeURIComponent(roomName)}&identity=${encodeURIComponent(identity)}&host=${isHost ? "1" : "0"}`, { signal: controller.signal })
       .then((res) => { if (!res.ok) throw new Error("Could not get token"); return res.json(); })
       .then((d) => setTokenData(d as TokenResponse))
       .catch((e) => { if (e?.name !== "AbortError") setTokenError(e instanceof Error ? e.message : String(e)); });
     return () => controller.abort();
-  }, [identity, roomName]);
+  }, [identity, roomName, isHost]);
 
   const speechRecognitionAvailable = typeof window !== "undefined" && Boolean((window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition);
 
-  if (showSummary) return <MeetingSummaryDashboard captions={captions} roomName={roomName} meetingId={meetingId} onClose={() => { window.location.href = "/meeting"; }} />;
+  if (showSummary) return (
+    <MeetingSummaryDashboard 
+      captions={captions} 
+      roomName={roomName} 
+      meetingId={meetingId} 
+      isHost={isHost}
+      onClose={() => { window.location.href = "/meeting"; }} 
+    />
+  );
 
-  if (!tokenData && !tokenError) {
+  if (!tokenData && !tokenError && !connectionError) {
     return (
       <div className="h-screen w-full bg-[#09090e] flex items-center justify-center">
         <div className="text-center space-y-4">
@@ -1193,95 +1319,119 @@ export function LiveMeetingRoom({ roomName, identity, title = "Meeting", startWi
     );
   }
 
-  if (tokenError || !tokenData) {
+  if (tokenError || connectionError || !tokenData) {
     return (
       <div className="h-screen w-full bg-[#09090e] text-white flex items-center justify-center px-6">
         <div className="max-w-md rounded-2xl border border-red-500/20 bg-red-500/5 p-8 text-center">
           <p className="font-semibold">Unable to join</p>
-          <p className="mt-2 text-sm text-white/40">{tokenError ?? "No session returned."}</p>
+          <p className="mt-2 text-sm text-white/40">{tokenError ?? connectionError ?? "No session returned."}</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div ref={containerRef} className="h-screen w-full" onMouseMove={revealControls} onTouchStart={revealControls}>
-      <LiveKitRoom
-        serverUrl={tokenData.url}
-        token={tokenData.token}
-        audio={startWithMic ? { autoGainControl: true, echoCancellation: true, noiseSuppression: true } : false}
-        video={startWithCamera ? { facingMode: "user" } : false}
-        connect
-        onMediaDeviceFailure={(failure, kind) => {
-          const label = kind === "videoinput" ? "camera" : kind === "audioinput" ? "microphone" : "device";
-          setDeviceError(`Could not access your ${label}. ${(failure as any)?.message ?? ""}`);
-        }}
-      >
-        {/* Capture localParticipant for DM sending */}
-        <LocalParticipantCapture onReady={setDmLocalParticipant} />
-
-        <RoomDisconnectionListener onDisconnect={() => setShowSummary(true)} />
-        <NotificationSystem onToast={addToast} onDMReceived={handleDMReceived} localIdentity={identity} />
-        <RoomTranscriptionController
-          sttDisabled={STT_DISABLED} sttLang={DEFAULT_STT_LANG} sttChunkMs={DEFAULT_STT_CHUNK_MS}
-          speechRecognitionAvailable={speechRecognitionAvailable} sttProviderOrder={DEFAULT_STT_ORDER}
-          onCaptionsChange={setCaptions} onInterimChange={setInterimCaption}
-          onErrorChange={setCaptionError} meetingId={meetingId}
-        />
-
-        <MeetingLayout
-          controlsVisible={controlsVisible}
-          header={<MeetingHeader title={title} />}
-          sidebar={activePanel ? (
-            <SidePanel
-              activePanel={activePanel}
-              onClose={() => setActivePanel(null)}
-              captions={captions} interimCaption={interimCaption} captionError={captionError}
-              speechRecognitionAvailable={speechRecognitionAvailable} providerOrder={DEFAULT_STT_ORDER}
-              meetingId={meetingId} dmTarget={dmTarget} dmMessages={dmMessages}
-              onSendDM={sendDM}
-              onDMParticipant={(id) => { setDmTarget(id); setActivePanel("chat"); }}
-            />
-          ) : undefined}
-          controls={
-            <MeetingControls
-              activePanel={activePanel}
-              onTogglePanel={(p) => { setActivePanel((c) => c === p ? null : p); if (p !== "chat") setDmTarget(null); }}
-              onDeviceError={(e) => setDeviceError(e?.message ?? null)}
-              isFullscreen={isFullscreen} onToggleFullscreen={toggleFullscreen}
-              viewMode={viewMode} onToggleView={() => { setViewMode((v) => v === "grid" ? "speaker" : "grid"); setFocusedIdentity(null); }}
-            />
-          }
+    <ErrorBoundary>
+      <div ref={containerRef} className="h-screen w-full" onMouseMove={revealControls} onTouchStart={revealControls}>
+        <LiveKitRoom
+          serverUrl={tokenData.url}
+          token={tokenData.token}
+          audio={startWithMic ? { autoGainControl: true, echoCancellation: true, noiseSuppression: true } : false}
+          video={startWithCamera ? { facingMode: "user" } : false}
+          connect
+          onConnected={handleLiveKitConnected}
+          onDisconnected={handleLiveKitDisconnected}
+          onError={handleLiveKitError}
+          onMediaDeviceFailure={(failure, kind) => {
+            const label = kind === "videoinput" ? "camera" : kind === "audioinput" ? "microphone" : "device";
+            setDeviceError(`Could not access your ${label}. ${(failure as any)?.message ?? ""}`);
+          }}
         >
-          {/* Toast notifications */}
-          <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+          <LocalParticipantCapture onReady={setDmLocalParticipant} />
 
-          {/* Device error toast */}
-          {deviceError && (
-            <div className="absolute top-20 left-1/2 -translate-x-1/2 z-30 w-full max-w-sm px-4">
-              <div className="rounded-2xl border border-amber-500/20 bg-[#1a1407]/90 backdrop-blur-xl p-4 flex gap-3 items-start shadow-2xl">
-                <span className="text-amber-400 mt-0.5 shrink-0">⚠</span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-amber-200">Device issue</p>
-                  <p className="mt-0.5 text-xs text-amber-200/60 leading-relaxed">{deviceError}</p>
-                </div>
-                <button type="button" onClick={() => setDeviceError(null)} className="text-white/30 hover:text-white transition">
-                  <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M6 6l12 12M18 6 6 18" /></svg>
-                </button>
-              </div>
-            </div>
-          )}
-
-          <MeetingStage
-            viewMode={viewMode}
-            focusedIdentity={focusedIdentity}
-            onTileClick={(id) => { setFocusedIdentity((c) => c === id ? null : id); if (focusedIdentity !== id) setViewMode("speaker"); }}
+          <NotificationSystem onToast={addToast} onDMReceived={handleDMReceived} localIdentity={identity} isHost={isHost} />
+          <RoomTranscriptionController
+            sttDisabled={STT_DISABLED} sttLang={DEFAULT_STT_LANG} sttChunkMs={DEFAULT_STT_CHUNK_MS}
+            speechRecognitionAvailable={speechRecognitionAvailable} sttProviderOrder={DEFAULT_STT_ORDER}
+            onCaptionsChange={setCaptions} onInterimChange={setInterimCaption}
+            onErrorChange={setCaptionError} meetingId={meetingId}
           />
-        </MeetingLayout>
-      </LiveKitRoom>
-    </div>
+
+          <MeetingLayout
+            controlsVisible={controlsVisible}
+            header={<MeetingHeader title={title} />}
+            sidebar={activePanel ? (
+              <SidePanel
+                activePanel={activePanel}
+                onClose={() => setActivePanel(null)}
+                captions={captions} interimCaption={interimCaption} captionError={captionError}
+                speechRecognitionAvailable={speechRecognitionAvailable} providerOrder={DEFAULT_STT_ORDER}
+                meetingId={meetingId} dmTarget={dmTarget} dmMessages={dmMessages}
+                onSendDM={sendDM}
+                onDMParticipant={(id) => { setDmTarget(id); setActivePanel("chat"); }}
+              />
+            ) : undefined}
+            controls={
+              <MeetingControls
+                activePanel={activePanel}
+                onTogglePanel={(p) => { setActivePanel((c) => c === p ? null : p); if (p !== "chat") setDmTarget(null); }}
+                onDeviceError={(e) => setDeviceError(e?.message ?? null)}
+                isFullscreen={isFullscreen} onToggleFullscreen={toggleFullscreen}
+                viewMode={viewMode} onToggleView={() => { setViewMode((v) => v === "grid" ? "speaker" : "grid"); setFocusedIdentity(null); }}
+                isHost={isHost}
+                onEndMeeting={endMeeting}
+                onLeave={handleLeave}
+              />
+            }
+          >
+            <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+
+            {deviceError && (
+              <div className="absolute top-20 left-1/2 -translate-x-1/2 z-30 w-full max-w-sm px-4">
+                <div className="rounded-2xl border border-amber-500/20 bg-[#1a1407]/90 backdrop-blur-xl p-4 flex gap-3 items-start shadow-2xl">
+                  <span className="text-amber-400 mt-0.5 shrink-0">⚠</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-amber-200">Device issue</p>
+                    <p className="mt-0.5 text-xs text-amber-200/60 leading-relaxed">{deviceError}</p>
+                  </div>
+                  <button type="button" onClick={() => setDeviceError(null)} className="text-white/30 hover:text-white transition">
+                    <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M6 6l12 12M18 6 6 18" /></svg>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {meetingEndedByHost && (
+              <div className="absolute top-20 left-1/2 -translate-x-1/2 z-30 w-full max-w-sm px-4">
+                <div className="rounded-2xl border border-blue-500/20 bg-blue-500/10 backdrop-blur-xl p-4 flex gap-3 items-start shadow-2xl">
+                  <span className="text-blue-400 mt-0.5 shrink-0">📢</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-blue-200">Meeting ended by host</p>
+                    <p className="mt-0.5 text-xs text-blue-200/60">Redirecting to summary…</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <MeetingStage
+              viewMode={viewMode}
+              focusedIdentity={focusedIdentity}
+              onTileClick={(id) => { 
+                setFocusedIdentity((c) => {
+                  const next = c === id ? null : id;
+                  if (next) setViewMode("speaker");
+                  return next;
+                }); 
+              }}
+            />
+          </MeetingLayout>
+        </LiveKitRoom>
+      </div>
+    </ErrorBoundary>
   );
 }
+
+import React from "react";
 
 /* Helper: capture localParticipant ref outside LiveKitRoom context */
 function LocalParticipantCapture({ onReady }: { onReady: (p: any) => void }) {

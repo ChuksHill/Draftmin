@@ -1,98 +1,165 @@
 import { NextResponse } from "next/server";
 
-export const runtime = "nodejs";
+type SttProvider = "deepgram" | "whisper";
 
-// Whisper accepts these containers. We map whatever the browser sent to the
-// closest supported format so the filename extension matches the bytes.
-const MIME_TO_EXT: Record<string, string> = {
-  "audio/webm": "webm",
-  "audio/ogg": "ogg",
-  "audio/mp4": "mp4",
-  "audio/mpeg": "mp3",
-  "audio/wav": "wav",
-  "audio/x-wav": "wav",
-  "audio/aac": "aac",
-  "audio/flac": "flac",
-};
-
-function resolveExt(contentType: string): string {
-  const base = contentType.split(";")[0].trim().toLowerCase();
-  return MIME_TO_EXT[base] ?? "webm";
+function parseProviderOrder(value: string | null | undefined): SttProvider[] {
+  if (!value) return [];
+  return value
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter((e): e is SttProvider => e === "deepgram" || e === "whisper");
 }
 
-async function transcribeWithWhisper(
-  audioBuffer: ArrayBuffer,
-  contentType: string,
-  lang: string
-) {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error("Missing OPENAI_API_KEY");
+function normalizeLang(value: string | null | undefined) {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  const [base] = trimmed.split("-");
+  return { raw: trimmed, base: base?.toLowerCase() };
+}
 
-  const ext = resolveExt(contentType);
-  const mimeBase = contentType.split(";")[0].trim() || "audio/webm";
+async function transcribeWithDeepgram(params: {
+  audio: ArrayBuffer;
+  contentType: string;
+  lang?: string;
+}): Promise<string> {
+  const apiKey = process.env.DEEPGRAM_API_KEY;
+  if (!apiKey) throw new Error("Missing DEEPGRAM_API_KEY");
 
-  const blob = new Blob([audioBuffer], { type: mimeBase });
-  const form = new FormData();
-  form.set("model", "whisper-1");
-  form.set("language", lang.split("-")[0]); // "en-US" → "en"
-  form.set("file", blob, `audio.${ext}`);   // correct extension for Whisper
+  const model = process.env.DEEPGRAM_MODEL?.trim() || "nova-3";
+  const url = new URL("https://api.deepgram.com/v1/listen");
+  url.searchParams.set("model", model);
+  url.searchParams.set("smart_format", "true");
+  url.searchParams.set("punctuate", "true");
+  url.searchParams.set("numerals", "true");
+  url.searchParams.set("filler_words", "false");
+  url.searchParams.set("utterances", "false");
+  url.searchParams.set("endpointing", "300");
+  if (params.lang) url.searchParams.set("language", params.lang);
 
-  const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+  const response = await fetch(url.toString(), {
     method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}` },
-    body: form,
+    headers: {
+      Authorization: `Token ${apiKey}`,
+      "Content-Type": params.contentType,
+    },
+    body: params.audio,
   });
 
-  const text = await response.text();
-  if (!response.ok) throw new Error(`Whisper ${response.status}: ${text}`);
-
-  try {
-    const data = JSON.parse(text);
-    return (data.text ?? "").trim();
-  } catch {
-    throw new Error("Invalid Whisper response: " + text);
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`Deepgram error (${response.status}): ${text || response.statusText}`);
   }
+
+  const data = (await response.json()) as {
+    results?: { channels?: Array<{ alternatives?: Array<{ transcript?: string }> }> };
+  };
+
+  return data.results?.channels?.[0]?.alternatives?.[0]?.transcript?.trim() ?? "";
 }
 
-// Known Whisper hallucination patterns on silence/noise — discard these.
-const HALLUCINATION_RE =
-  /^(thanks? for watching|thank you\.?|you\.?|\.+|\s*)*$/i;
+async function transcribeWithWhisper(params: {
+  audio: ArrayBuffer;
+  contentType: string;
+  langBase?: string;
+}): Promise<string> {
+  const buildForm = (model: string) => {
+    const form = new FormData();
+    form.set("model", model);
+    form.set("temperature", "0");
+    form.set("response_format", "json");
+    form.set("prompt", "This is a professional meeting or conversation. Use proper punctuation, capitalize names and acronyms.");
+    if (params.langBase) form.set("language", params.langBase);
+    const file = new File([params.audio], "audio.webm", { type: params.contentType || "audio/webm" });
+    form.set("file", file);
+    return form;
+  };
+
+  // Try Groq first
+  const groqKey = process.env.GROQ_API_KEY;
+  if (groqKey) {
+    try {
+      const groqModel = process.env.GROQ_WHISPER_MODEL?.trim() || "whisper-large-v3";
+      const res = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${groqKey}` },
+        body: buildForm(groqModel),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as { text?: string };
+        return data.text?.trim() ?? "";
+      }
+      console.warn(`Groq Whisper (${res.status}), falling back to OpenAI.`);
+    } catch (e) {
+      console.warn("Groq Whisper failed:", e);
+    }
+  }
+
+  // Fallback to OpenAI
+  const openAiKey = process.env.OPENAI_API_KEY;
+  if (!openAiKey) throw new Error("Missing both GROQ_API_KEY and OPENAI_API_KEY");
+  const openAiModel = process.env.OPENAI_WHISPER_MODEL?.trim() || "whisper-1";
+
+  const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${openAiKey}` },
+    body: buildForm(openAiModel),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Whisper error (${res.status}): ${text || res.statusText}`);
+  }
+
+  const data = (await res.json()) as { text?: string };
+  return data.text?.trim() ?? "";
+}
 
 export async function POST(request: Request) {
   try {
-    const rawContentType =
-      request.headers.get("content-type") ?? "audio/webm";
-    const lang =
-      request.headers.get("x-stt-lang") ?? "en";
+    if ((process.env.NEXT_PUBLIC_STT_DISABLED ?? "").trim()) {
+      return NextResponse.json({ error: "STT disabled" }, { status: 503 });
+    }
+
+    const contentTypeHeader = request.headers.get("content-type") ?? "application/octet-stream";
+    const contentType = contentTypeHeader.split(";")[0]?.trim() || "application/octet-stream";
+    const lang = normalizeLang(request.headers.get("x-stt-lang"));
+
+    const reqProvider = request.headers.get("x-stt-provider")?.trim().toLowerCase();
+    const requestedProvider: SttProvider | undefined =
+      reqProvider === "deepgram" || reqProvider === "whisper" ? reqProvider : undefined;
+
+    const envOrder = parseProviderOrder(
+      process.env.STT_HYBRID_PROVIDER_ORDER || process.env.NEXT_PUBLIC_STT_PROVIDER_ORDER
+    );
+
+    const providerOrder: SttProvider[] =
+      requestedProvider ? [requestedProvider]
+      : envOrder.length > 0 ? envOrder
+      : ["deepgram", "whisper"];
 
     const audio = await request.arrayBuffer();
-
-    console.log("[stt]", {
-      size: audio.byteLength,
-      contentType: rawContentType,
-      lang,
-    });
-
-    // Reject obviously-empty payloads before hitting Whisper
-    if (audio.byteLength < 1_000) {
-      return NextResponse.json(
-        { error: "Audio chunk too small" },
-        { status: 400 }
-      );
+    if (audio.byteLength === 0) {
+      return NextResponse.json({ error: "Empty audio payload" }, { status: 400 });
     }
 
-    const text = await transcribeWithWhisper(audio, rawContentType, lang);
-
-    // Filter Whisper hallucinations (silent-chunk artifacts)
-    if (!text || HALLUCINATION_RE.test(text)) {
-      console.log("[stt] discarded hallucination:", JSON.stringify(text));
-      return NextResponse.json({ text: "" });
-    }
+    const errors: { provider: SttProvider; message: string }[] = [];
     
-    console.log("[stt] result:", text);
-    return NextResponse.json({ text });
+    for (const provider of providerOrder) {
+      try {
+        const text =
+          provider === "deepgram"
+            ? await transcribeWithDeepgram({ audio, contentType, lang: lang?.raw })
+            : await transcribeWithWhisper({ audio, contentType, langBase: lang?.base });
+        return NextResponse.json({ provider, text });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`[stt] provider failed: ${provider}`, message);
+        errors.push({ provider, message });
+      }
+    }
+
+    return NextResponse.json({ error: "All STT providers failed", errors }, { status: 502 });
   } catch (error) {
-    console.error("[stt] error:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : String(error) },
       { status: 500 }

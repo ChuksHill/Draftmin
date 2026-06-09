@@ -1,72 +1,74 @@
 import { NextResponse } from "next/server";
 import { AccessToken } from "livekit-server-sdk";
 
-const LIVEKIT_URL =
-  process.env.LIVEKIT_URL || process.env.LIVEKIT_SERVER_URL;
+function sanitizeRoomName(name: string): string {
+  return name
+    .replace(/[^a-zA-Z0-9_-]/g, "-")
+    .replace(/-{2,}/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 64) || "draftmin-room";
+}
 
-const LIVEKIT_API_KEY = process.env.LIVEKIT_API_KEY;
-const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET;
+function sanitizeIdentity(identity: string): string {
+  return identity
+    .replace(/[^a-zA-Z0-9_-]/g, "-")
+    .replace(/-{2,}/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 64) || "guest";
+}
 
 export async function GET(request: Request) {
   try {
-    if (
-      !LIVEKIT_URL ||
-      !LIVEKIT_API_KEY ||
-      !LIVEKIT_API_SECRET
-    ) {
+    const livekitUrl = process.env.LIVEKIT_URL || process.env.LIVEKIT_SERVER_URL;
+    const livekitApiKey = process.env.LIVEKIT_API_KEY;
+    const livekitApiSecret = process.env.LIVEKIT_API_SECRET;
+
+    if (!livekitUrl || !livekitApiKey || !livekitApiSecret) {
       return NextResponse.json(
-        {
-          error:
-            "Missing LiveKit environment variables.",
-        },
+        { error: "Missing LiveKit environment variables." },
         { status: 500 }
       );
     }
 
     const url = new URL(request.url);
+    const rawRoom = url.searchParams.get("room") ?? "draftmin-room";
+    const rawIdentity = url.searchParams.get("identity") ?? `attendee-${Math.random().toString(36).slice(2, 8)}`;
+    const isHost = url.searchParams.get("host") === "1";
 
-    const roomName =
-      url.searchParams.get("room") ??
-      "draftmin-room";
+    const roomName = sanitizeRoomName(rawRoom);
+    const identity = sanitizeIdentity(rawIdentity);
 
-    const identity =
-      url.searchParams.get("identity") ??
-      `attendee-${Math.random()
-        .toString(36)
-        .slice(2, 8)}`;
-
-    const accessToken = new AccessToken(
-      LIVEKIT_API_KEY,
-      LIVEKIT_API_SECRET,
-      {
-        identity,
-        ttl: "1h",
-      }
-    );
+    const accessToken = new AccessToken(livekitApiKey, livekitApiSecret, {
+      identity,
+      ttl: "4h", // Extended for long meetings
+      metadata: JSON.stringify({ 
+        isHost: isHost ? "1" : "0",
+        displayName: identity 
+      }),
+    });
 
     accessToken.addGrant({
       roomJoin: true,
       room: roomName,
       canPublish: true,
       canSubscribe: true,
+      canPublishData: true,
+      roomAdmin: isHost, // Host gets admin privileges
     });
 
-    // ✅ IMPORTANT: await the JWT
     const jwt = await accessToken.toJwt();
 
     return NextResponse.json({
-      url: LIVEKIT_URL,
+      url: livekitUrl,
       token: jwt,
       room: roomName,
       identity,
+      isHost,
     });
   } catch (error) {
     console.error("LiveKit token error:", error);
-
     return NextResponse.json(
-      {
-        error: "Failed to generate token",
-      },
+      { error: "Failed to generate token" },
       { status: 500 }
     );
   }
