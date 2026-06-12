@@ -5,7 +5,7 @@ export async function POST(request: Request) {
     const { transcript, participants, meetingContext } = (await request.json()) as { 
       transcript: string[]; 
       participants?: string[];
-      meetingContext?: { language?: string; region?: string; };
+      meetingContext?: { language?: string; region?: string; meetingType?: string; };
     };
 
     if (!transcript?.length) {
@@ -17,13 +17,30 @@ export async function POST(request: Request) {
     const dateStr = now.toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
     const timeStr = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", timeZoneName: "short" });
 
-    // Build context-aware prompt
     const languageContext = meetingContext?.language === "nigerian-english" 
       ? `You are an expert at understanding Nigerian English, including local idioms, phrasing, and pronunciation patterns. Interpret Igbo, Yoruba, and Hausa words or phrases that appear in otherwise English conversations contextually.`
       : "";
+    const meetingType = meetingContext?.meetingType?.toLowerCase() ?? "default";
+    const meetingTypePrompt = (() => {
+      switch (meetingType) {
+        case "board":
+          return "Produce formal board-level minutes. Focus on governance decisions, motions, voting outcomes, and high-level strategic summaries. Use structured headings and formal language.";
+        case "standup":
+          return "Create concise stand-up style minutes. For each speaker list: (1) what they completed, (2) what they plan to do next, (3) any blockers. Keep it brief and scannable.";
+        case "retro":
+          return "Generate retrospective minutes. Use three sections per team: What Went Well, What Didn't Go Well, and Action Items. Be specific and solution-oriented.";
+        case "workshop":
+          return "Write workshop minutes. Capture the agenda, key activities, group discussions, breakout findings, and all outputs or deliverables produced.";
+        case "client":
+          return "Produce client-meeting minutes in a polished, professional tone suitable for external sharing. Emphasise commitments, timelines, and next steps.";
+        default:
+          return "Produce comprehensive, professional meeting minutes suitable for any general business meeting.";
+      }
+    })();
 
     const systemPrompt = `You are a highly experienced corporate secretary with 20+ years writing formal board-level and executive meeting minutes for international companies.
 ${languageContext}
+${meetingTypePrompt}
 
 You are an expert at:
 - Correcting obvious speech-to-text errors — repeated words, phonetic misspellings, filler words — without changing the speaker's meaning
@@ -39,8 +56,8 @@ Your minutes must:
 - Be formatted in clean, professional Markdown`;
 
     const attendanceBlock = participants && participants.length > 0
-      ? `REGISTERED PARTICIPANTS (from meeting database):\n${participants.map((p, i) => `${i + 1}. ${p}`).join("\n")}\n\n`
-      : "";
+      ? `REGISTERED PARTICIPANTS (from meeting database — this list is authoritative and complete, include ALL of them in the Attendance section even if they did not speak):\n${participants.map((p, i) => `${i + 1}. ${p}`).join("\n")}\n\n`
+      : `REGISTERED PARTICIPANTS: None recorded in database. Derive attendance from transcript speakers only.\n\n`;
 
     const userPrompt = `Please produce complete, formal meeting minutes from the transcript below.
 
@@ -53,7 +70,7 @@ IMPORTANT INSTRUCTIONS:
 MEETING DATE: ${dateStr}
 MEETING TIME: ${timeStr}
 
-${attendanceBlock}TRANSCRIPT:
+${attendanceBlock}RAW TRANSCRIPT (STT):
 ${transcriptText}
 
 ---
@@ -71,7 +88,7 @@ Write the minutes in this exact format:
 
 ## 1. ATTENDANCE
 
-*List every speaker identified in the transcript by name.*
+*List EVERY person from the REGISTERED PARTICIPANTS list above. Also include any additional speakers found in the transcript who are not on that list. Mark the host where known.*
 
 ---
 

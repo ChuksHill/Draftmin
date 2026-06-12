@@ -48,6 +48,7 @@ const STT_DISABLED = Boolean((process.env.NEXT_PUBLIC_STT_DISABLED ?? "").trim()
 export type LiveMeetingRoomProps = {
   roomName: string; identity: string; title?: string;
   startWithMic?: boolean; startWithCamera?: boolean;
+  meetingType?: string;
 };
 
 /* ─── Helpers ────────────────────────────────────────────────────────────── */
@@ -94,11 +95,15 @@ function NotificationSystem({
   onDMReceived,
   localIdentity,
   isHost,
+  meetingId,
+  recordParticipantJoin,
 }: {
   onToast: (t: Omit<ToastItem, "id">) => void;
   onDMReceived: (from: string, text: string, timestamp: number) => void;
   localIdentity: string;
   isHost: boolean;
+  meetingId?: string;
+  recordParticipantJoin?: (meetingId: string, isSpeaking: boolean) => void;
 }) {
   const room = useRoomContext();
 
@@ -107,6 +112,9 @@ function NotificationSystem({
 
     const onJoin = (p: any) => {
       onToast({ type: "join", title: `${identityToDisplay(p.identity)} joined the meeting` });
+      if (recordParticipantJoin) {
+        void recordParticipantJoin(meetingId ?? "", false);
+      }
     };
     const onLeave = (p: any) => {
       onToast({ type: "leave", title: `${identityToDisplay(p.identity)} left the meeting` });
@@ -481,18 +489,21 @@ function CaptionsPanel({
 
   return (
     <div className="flex-1 overflow-y-auto p-3 space-y-2">
-      <div className="rounded-xl border border-white/[0.06] bg-white/[0.03] p-3 text-xs text-white/40 leading-relaxed">
-        Live captions appear here. Speak clearly with your mic on for best results.
+      <div className="flex items-start sm:items-center justify-between flex-col sm:flex-row gap-3 rounded-xl border border-white/[0.06] bg-white/[0.03] p-3 text-xs">
+        <span className="text-white/40 leading-relaxed">Live captions appear here. Speak clearly with your mic on for best results.</span>
+        <div className="flex items-center gap-2 shrink-0 bg-black/20 px-2.5 py-1.5 rounded-lg border border-white/[0.04]">
+          <span className={`relative flex h-2 w-2`}>
+            {!captionError && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>}
+            <span className={`relative inline-flex rounded-full h-2 w-2 ${captionError ? 'bg-red-500' : 'bg-emerald-500'}`}></span>
+          </span>
+          <span className={`font-medium ${captionError ? 'text-red-400' : 'text-emerald-400'}`}>
+            {captionError ? 'STT Inactive' : 'STT Active'}
+          </span>
+        </div>
       </div>
       {!speechRecognitionAvailable && providerOrder.includes("webspeech") && (
         <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-300">
           Browser speech recognition not available. Enable Deepgram or Whisper via environment variables for better results.
-        </div>
-      )}
-      {captionError && (
-        <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-3 text-xs text-red-300">
-          <div className="font-semibold">STT Error</div>
-          <p className="mt-1 text-red-200/70">{captionError}</p>
         </div>
       )}
       {captions.map((c, i) => {
@@ -858,14 +869,19 @@ function MarkdownRenderer({ text }: { text: string }) {
 }
 
 /* ─── Meeting summary dashboard ──────────────────────────────────────────── */
-function MeetingSummaryDashboard({ captions, roomName, onClose, meetingId, isHost }: {
+function MeetingSummaryDashboard({ captions, roomName, onClose, meetingId, isHost, initialMeetingType }: {
   captions: string[]; roomName: string; onClose: () => void; meetingId: string | null; isHost: boolean;
+  initialMeetingType?: string;
 }) {
   const [summaryText, setSummaryText] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [meetingType, setMeetingType] = useState<"general" | "board" | "standup" | "retro" | "workshop" | "client">(
+    (initialMeetingType as "general" | "board" | "standup" | "retro" | "workshop" | "client") || "general"
+  );
+  const [showTypeSelector, setShowTypeSelector] = useState(false);
 
   const saveSummaryToSupabase = useCallback(async (minutes: string) => {
     if (!meetingId || saved) return;
@@ -922,10 +938,10 @@ function MeetingSummaryDashboard({ captions, roomName, onClose, meetingId, isHos
     }
   }, [meetingId, saved]);
 
-  const generate = useCallback(async () => {
+  const generate = useCallback(async (force = false) => {
     setIsGenerating(true); setError(null);
     try {
-      if (meetingId) {
+      if (meetingId && !force) {
         const { data: existing, error: fetchErr } = await supabase
           .from("meeting_summaries")
           .select("markdown_content")
@@ -963,9 +979,13 @@ function MeetingSummaryDashboard({ captions, roomName, onClose, meetingId, isHos
         }
       }
 
-      if (!finalTranscript.length) { 
-        setError("No transcript to summarise. Enable captions during your next meeting."); 
+      if (!finalTranscript.length && !participantList.length) { 
+        setError("No transcript or participants found for this meeting."); 
         return; 
+      }
+      // If no transcript, create a placeholder so summary still generates
+      if (!finalTranscript.length) {
+        finalTranscript = ["(No speech was recorded during this meeting.)"];
       }
       
       const res = await fetch("/api/summary", { 
@@ -977,6 +997,7 @@ function MeetingSummaryDashboard({ captions, roomName, onClose, meetingId, isHos
           meetingContext: {
             language: process.env.NEXT_PUBLIC_MEETING_LANGUAGE || undefined,
             region: process.env.NEXT_PUBLIC_MEETING_REGION || undefined,
+            meetingType,
           }
         }) 
       });
@@ -986,7 +1007,7 @@ function MeetingSummaryDashboard({ captions, roomName, onClose, meetingId, isHos
       void saveSummaryToSupabase(d.minutes);
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     finally { setIsGenerating(false); }
-  }, [captions, meetingId, saveSummaryToSupabase]);
+  }, [captions, meetingId, saveSummaryToSupabase, meetingType]);
 
   useEffect(() => { void generate(); }, []);
 
@@ -1015,26 +1036,63 @@ function MeetingSummaryDashboard({ captions, roomName, onClose, meetingId, isHos
 
       <main className="flex-1 min-h-0 flex flex-col lg:flex-row p-4 sm:p-6 gap-4 sm:gap-6 overflow-auto">
         <section className="flex-1 flex flex-col min-w-0 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-5 min-h-[400px] lg:min-h-0">
-          <div className="flex items-center justify-between pb-4 border-b border-white/[0.06] shrink-0 gap-3">
+          <div className="flex items-center justify-between pb-4 border-b border-white/[0.06] shrink-0 gap-3 flex-wrap">
             <div className="min-w-0">
               <h2 className="text-sm font-bold text-white flex items-center gap-2"><span className="text-blue-400">✦</span> AI Meeting Minutes</h2>
               <p className="text-xs text-white/30 mt-0.5 hidden sm:block">Secretary-quality · Powered by Groq + Llama 3.3</p>
             </div>
-            {summaryText && (
-              <div className="flex gap-2 shrink-0">
-                <button onClick={() => { navigator.clipboard.writeText(summaryText); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
-                  className="h-8 rounded-xl border border-white/[0.08] bg-white/5 px-3 text-xs text-white/60 hover:text-white hover:bg-white/10 transition hidden sm:inline-flex">
-                  {copied ? "Copied!" : "Copy"}
+            <div className="flex gap-2 shrink-0 flex-wrap items-center">
+              {/* Meeting Type Selector */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowTypeSelector(v => !v)}
+                  className="h-8 rounded-xl border border-white/[0.08] bg-white/5 px-3 text-xs text-white/60 hover:text-white hover:bg-white/10 transition flex items-center gap-1.5"
+                >
+                  <span>📋</span>
+                  <span className="capitalize">{meetingType === 'standup' ? 'Stand-up' : meetingType === 'retro' ? 'Retro' : meetingType.charAt(0).toUpperCase() + meetingType.slice(1)}</span>
+                  <svg viewBox="0 0 24 24" fill="none" className="h-3 w-3" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M6 9l6 6 6-6" /></svg>
                 </button>
-                <button onClick={() => { const b = new Blob([summaryText], { type: "text/markdown" }); const u = URL.createObjectURL(b); const a = document.createElement("a"); a.href = u; a.download = `minutes_${roomName}.md`; a.click(); URL.revokeObjectURL(u); }}
-                  className="h-8 rounded-xl border border-white/[0.08] bg-white/5 px-3 text-xs text-white/60 hover:text-white hover:bg-white/10 transition">
-                  Download .md
-                </button>
-                <button onClick={() => void generate()} className="h-8 rounded-xl border border-white/[0.08] bg-white/5 px-3 text-xs text-white/60 hover:text-white hover:bg-white/10 transition hidden sm:inline-flex">
-                  Regenerate
-                </button>
+                {showTypeSelector && (
+                  <div className="absolute right-0 top-10 z-50 w-44 rounded-xl border border-white/[0.08] bg-[#1a1c25] shadow-2xl overflow-hidden">
+                    {([
+                      { value: 'general', label: '📝 General Meeting' },
+                      { value: 'board', label: '🏛️ Board Meeting' },
+                      { value: 'standup', label: '⚡ Stand-up' },
+                      { value: 'retro', label: '🔄 Retrospective' },
+                      { value: 'workshop', label: '🛠️ Workshop' },
+                      { value: 'client', label: '🤝 Client Meeting' },
+                    ] as const).map(opt => (
+                      <button
+                        key={opt.value}
+                        onClick={() => { setMeetingType(opt.value); setShowTypeSelector(false); setSaved(false); }}
+                        className={`w-full text-left px-4 py-2.5 text-xs transition ${
+                          meetingType === opt.value
+                            ? 'bg-blue-600/20 text-blue-300'
+                            : 'text-white/60 hover:bg-white/[0.06] hover:text-white'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
+              {summaryText && (
+                <>
+                  <button onClick={() => { navigator.clipboard.writeText(summaryText); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+                    className="h-8 rounded-xl border border-white/[0.08] bg-white/5 px-3 text-xs text-white/60 hover:text-white hover:bg-white/10 transition hidden sm:inline-flex">
+                    {copied ? "Copied!" : "Copy"}
+                  </button>
+                  <button onClick={() => { const b = new Blob([summaryText], { type: "text/markdown" }); const u = URL.createObjectURL(b); const a = document.createElement("a"); a.href = u; a.download = `minutes_${roomName}.md`; a.click(); URL.revokeObjectURL(u); }}
+                    className="h-8 rounded-xl border border-white/[0.08] bg-white/5 px-3 text-xs text-white/60 hover:text-white hover:bg-white/10 transition">
+                    Download .md
+                  </button>
+                  <button onClick={() => { setSaved(false); void generate(true); }} className="h-8 rounded-xl border border-blue-500/30 bg-blue-500/10 px-3 text-xs text-blue-300 hover:text-white hover:bg-blue-500/20 transition hidden sm:inline-flex">
+                    Regenerate
+                  </button>
+                </>
+              )}
+            </div>
           </div>
           <div className="flex-1 overflow-y-auto mt-4 pr-1 min-h-0">
             {isGenerating && (
@@ -1047,7 +1105,7 @@ function MeetingSummaryDashboard({ captions, roomName, onClose, meetingId, isHos
             {error && !isGenerating && (
               <div className="rounded-2xl border border-red-500/20 bg-red-500/5 p-6 text-center">
                 <p className="text-sm text-red-300">{error}</p>
-                <button onClick={() => void generate()} className="mt-3 h-8 rounded-xl bg-red-600 px-4 text-xs font-medium text-white hover:bg-red-500 transition">Retry</button>
+                <button onClick={() => void generate(true)} className="mt-3 h-8 rounded-xl bg-red-600 px-4 text-xs font-medium text-white hover:bg-red-500 transition">Retry</button>
               </div>
             )}
             {summaryText && !isGenerating && <MarkdownRenderer text={summaryText} />}

@@ -23,6 +23,12 @@ export function PreJoinScreen({ roomName }: PreJoinScreenProps) {
   const [permissionPending, setPermissionPending] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const [joining, setJoining] = useState(false);
+  const [meetingType, setMeetingType] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      return window.localStorage.getItem("draftmin.meetingType") || "general";
+    }
+    return "general";
+  });
 
   const initials = useMemo(() => initialsFromName(displayName || "Guest"), [displayName]);
 
@@ -152,6 +158,7 @@ export function PreJoinScreen({ roomName }: PreJoinScreenProps) {
     setJoining(true);
     const safeName = displayName.trim() || "Guest";
     window.localStorage.setItem("draftmin.displayName", safeName);
+    window.localStorage.setItem("draftmin.meetingType", meetingType);
     
     // Save/update profile name in Supabase
     try {
@@ -174,7 +181,7 @@ export function PreJoinScreen({ roomName }: PreJoinScreenProps) {
     if (videoRef.current) videoRef.current.srcObject = null;
     
     router.push(
-      `/meeting/${encodeURIComponent(roomName)}?name=${encodeURIComponent(safeName)}&mic=${micOn ? "1" : "0"}&cam=${cameraOn ? "1" : "0"}`,
+      `/meeting/${encodeURIComponent(roomName)}?name=${encodeURIComponent(safeName)}&mic=${micOn ? "1" : "0"}&cam=${cameraOn ? "1" : "0"}&type=${encodeURIComponent(meetingType)}`,
     );
   };
 
@@ -336,6 +343,37 @@ export function PreJoinScreen({ roomName }: PreJoinScreenProps) {
                   <span className={micOn ? "text-emerald-400" : "text-red-400"}>{micOn ? "mic on" : "mic off"}</span>{" "}
                   and{" "}
                   <span className={cameraOn ? "text-emerald-400" : "text-red-400"}>{cameraOn ? "camera on" : "camera off"}</span>.
+                </div>
+
+                {/* Meeting type selector */}
+                <div>
+                  <label className="block text-xs font-semibold text-white/50 uppercase tracking-wider mb-2">
+                    Meeting type
+                  </label>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {([
+                      { value: 'general', label: '📝 General' },
+                      { value: 'board', label: '🏛️ Board' },
+                      { value: 'standup', label: '⚡ Stand-up' },
+                      { value: 'retro', label: '🔄 Retro' },
+                      { value: 'workshop', label: '🛠️ Workshop' },
+                      { value: 'client', label: '🤝 Client' },
+                    ] as const).map(opt => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => setMeetingType(opt.value)}
+                        className={[
+                          "h-9 rounded-xl border text-xs font-medium transition flex items-center justify-center gap-1.5",
+                          meetingType === opt.value
+                            ? "border-blue-500/50 bg-blue-600/20 text-blue-300"
+                            : "border-white/10 bg-white/[0.03] text-white/50 hover:bg-white/[0.07] hover:text-white/80",
+                        ].join(" ")}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 <button

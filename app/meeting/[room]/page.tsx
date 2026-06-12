@@ -8,7 +8,7 @@ export default async function MeetingRoomPage({
   searchParams,
 }: {
   params: Promise<{ room: string }>;
-  searchParams: Promise<{ name?: string; mic?: string; cam?: string }>;
+  searchParams: Promise<{ name?: string; mic?: string; cam?: string; type?: string }>;
 }) {
   const resolvedParams = await params;
   const resolvedSearchParams = await searchParams;
@@ -36,6 +36,7 @@ export default async function MeetingRoomPage({
         title={`${displayName} • Draftmin`}
         startWithMic={resolvedSearchParams.mic !== "0"}
         startWithCamera={resolvedSearchParams.cam === "1"}
+        meetingType={resolvedSearchParams.type || "general"}
       />
     </AuthGuard>
   );
