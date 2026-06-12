@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { supabase } from "@/shared/lib/supabase/client";
 
 type PreJoinScreenProps = { roomName: string };
 
@@ -30,10 +31,45 @@ export function PreJoinScreen({ roomName }: PreJoinScreenProps) {
       ? `${window.location.origin}/meeting/${encodeURIComponent(roomName)}/prejoin`
       : "";
 
-  /* ── restore saved name ─────────────────────────────────────────────── */
+  /* ── restore saved name or profile name ──────────────────────────────── */
   useEffect(() => {
-    const saved = window.localStorage.getItem("draftmin.displayName");
-    if (saved?.trim()) setDisplayName(saved.trim());
+    async function loadProfileName() {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          // Fetch full_name from profiles
+          const { data: profile } = await supabase
+            .from("profiles")
+            .select("full_name")
+            .eq("id", user.id)
+            .maybeSingle();
+
+          if (profile?.full_name && profile.full_name !== "Anonymous") {
+            setDisplayName(profile.full_name);
+            return;
+          }
+
+          // Fallback to local storage
+          const saved = window.localStorage.getItem("draftmin.displayName");
+          if (saved?.trim()) {
+            setDisplayName(saved.trim());
+            return;
+          }
+
+          // Fallback to user metadata full_name/name or email prefix
+          const name = user.user_metadata?.full_name ?? user.user_metadata?.name ?? user.email?.split("@")[0] ?? "";
+          setDisplayName(name);
+        } else {
+          const saved = window.localStorage.getItem("draftmin.displayName");
+          if (saved?.trim()) setDisplayName(saved.trim());
+        }
+      } catch (err) {
+        console.warn("Failed to load profile name:", err);
+        const saved = window.localStorage.getItem("draftmin.displayName");
+        if (saved?.trim()) setDisplayName(saved.trim());
+      }
+    }
+    void loadProfileName();
   }, []);
 
   /* ── camera / mic preview ───────────────────────────────────────────── */
@@ -111,11 +147,24 @@ export function PreJoinScreen({ roomName }: PreJoinScreenProps) {
     };
   }, []);
 
-  const handleJoin = () => {
+  const handleJoin = async () => {
     if (joining) return;
     setJoining(true);
     const safeName = displayName.trim() || "Guest";
     window.localStorage.setItem("draftmin.displayName", safeName);
+    
+    // Save/update profile name in Supabase
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase
+          .from("profiles")
+          .update({ full_name: safeName })
+          .eq("id", user.id);
+      }
+    } catch (e) {
+      console.warn("Failed to update profile name on join:", e);
+    }
     
     // Stop preview stream
     if (streamRef.current) {

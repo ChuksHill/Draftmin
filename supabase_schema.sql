@@ -201,3 +201,26 @@ CREATE POLICY "Public select on chat attachments" ON storage.objects
 DROP POLICY IF EXISTS "Public insert on chat attachments" ON storage.objects;
 CREATE POLICY "Public insert on chat attachments" ON storage.objects
   FOR INSERT WITH CHECK (bucket_id = 'chat_attachments');
+
+-- =========================================================================
+-- 10. MEETING PARTICIPANTS
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS public.meeting_participants (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  meeting_id UUID REFERENCES public.meetings(id) ON DELETE CASCADE NOT NULL,
+  user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
+  display_name TEXT NOT NULL,
+  joined_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+  is_host BOOLEAN DEFAULT false NOT NULL
+);
+
+ALTER TABLE public.meeting_participants ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "View meeting participants" ON public.meeting_participants;
+CREATE POLICY "View meeting participants" ON public.meeting_participants 
+  FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Insert meeting participants" ON public.meeting_participants;
+CREATE POLICY "Insert meeting participants" ON public.meeting_participants 
+  FOR INSERT WITH CHECK (true);
+

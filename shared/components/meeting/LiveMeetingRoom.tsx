@@ -47,7 +47,7 @@ const STT_DISABLED = Boolean((process.env.NEXT_PUBLIC_STT_DISABLED ?? "").trim()
 
 export type LiveMeetingRoomProps = {
   roomName: string; identity: string; title?: string;
-  startWithMic?: boolean; startWithCamera?: boolean; isHost?: boolean;
+  startWithMic?: boolean; startWithCamera?: boolean;
 };
 
 /* ─── Helpers ────────────────────────────────────────────────────────────── */
@@ -925,8 +925,6 @@ function MeetingSummaryDashboard({ captions, roomName, onClose, meetingId, isHos
   const generate = useCallback(async () => {
     setIsGenerating(true); setError(null);
     try {
-      if (!captions.length) { setError("No transcript to summarise. Enable captions during your next meeting."); return; }
-      
       if (meetingId) {
         const { data: existing, error: fetchErr } = await supabase
           .from("meeting_summaries")
@@ -940,12 +938,42 @@ function MeetingSummaryDashboard({ captions, roomName, onClose, meetingId, isHos
           return;
         }
       }
+
+      // Fetch full transcripts from Supabase if we have meetingId
+      let finalTranscript = captions;
+      let participantList: string[] = [];
+      if (meetingId) {
+        const { data: dbTranscripts } = await supabase
+          .from("transcripts")
+          .select("speaker_name, transcript_text")
+          .eq("meeting_id", meetingId)
+          .order("created_at", { ascending: true });
+        
+        if (dbTranscripts && dbTranscripts.length > 0) {
+          finalTranscript = dbTranscripts.map(t => `${t.speaker_name}: ${t.transcript_text}`);
+        }
+
+        const { data: dbParticipants } = await supabase
+          .from("meeting_participants")
+          .select("display_name, is_host")
+          .eq("meeting_id", meetingId);
+        
+        if (dbParticipants) {
+          participantList = dbParticipants.map(p => `${p.display_name}${p.is_host ? " (Host)" : ""}`);
+        }
+      }
+
+      if (!finalTranscript.length) { 
+        setError("No transcript to summarise. Enable captions during your next meeting."); 
+        return; 
+      }
       
       const res = await fetch("/api/summary", { 
         method: "POST", 
         headers: { "Content-Type": "application/json" }, 
         body: JSON.stringify({ 
-          transcript: captions,
+          transcript: finalTranscript,
+          participants: participantList,
           meetingContext: {
             language: process.env.NEXT_PUBLIC_MEETING_LANGUAGE || undefined,
             region: process.env.NEXT_PUBLIC_MEETING_REGION || undefined,
@@ -1133,7 +1161,7 @@ function formatLiveKitConnectionError(error: Error) {
   return message;
 }
 
-export function LiveMeetingRoom({ roomName, identity, title = "Meeting", startWithMic = true, startWithCamera = false, isHost = false }: LiveMeetingRoomProps) {
+export function LiveMeetingRoom({ roomName, identity, title = "Meeting", startWithMic = true, startWithCamera = false }: LiveMeetingRoomProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasJoinedRoomRef = useRef(false);
@@ -1157,6 +1185,65 @@ export function LiveMeetingRoom({ roomName, identity, title = "Meeting", startWi
   const [dmMessages, setDmMessages] = useState<Record<string, DMMessage[]>>({});
   const [dmTarget, setDmTarget] = useState<string | null>(null);
   const [meetingEndedByHost, setMeetingEndedByHost] = useState(false);
+  const [resolvedIsHost, setResolvedIsHost] = useState<boolean | null>(null);
+
+  /* Host determination */
+  useEffect(() => {
+    async function determineHost() {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          setResolvedIsHost(false);
+          return;
+        }
+
+        const { data: meeting } = await supabase
+          .from("meetings")
+          .select("id, host_id")
+          .eq("room_name", roomName)
+          .maybeSingle();
+
+        if (!meeting) {
+          // No meeting exists yet. This user is starting it, so they are the host.
+          setResolvedIsHost(true);
+        } else {
+          setResolvedIsHost(meeting.host_id === user.id);
+        }
+      } catch (e) {
+        console.error("Failed to determine host:", e);
+        setResolvedIsHost(false);
+      }
+    }
+    void determineHost();
+  }, [roomName]);
+
+  const recordParticipantJoin = useCallback(async (mId: string, isH: boolean) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const display = identityToDisplay(identity);
+
+      // Check if participant already recorded for this meeting
+      const { data: existing } = await supabase
+        .from("meeting_participants")
+        .select("id")
+        .eq("meeting_id", mId)
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (!existing) {
+        await supabase.from("meeting_participants").insert({
+          meeting_id: mId,
+          user_id: user.id,
+          display_name: display,
+          is_host: isH
+        });
+      }
+    } catch (e) {
+      console.warn("Failed to record participant join:", e);
+    }
+  }, [identity]);
 
   const addToast = useCallback((t: Omit<ToastItem, "id">) => {
     const id = Math.random().toString(36).slice(2);
@@ -1210,7 +1297,14 @@ export function LiveMeetingRoom({ roomName, identity, title = "Meeting", startWi
   useEffect(() => { revealControls(); return () => { if (hideTimerRef.current) clearTimeout(hideTimerRef.current); }; }, []);
 
   /* Meeting sync */
-  useEffect(() => { void ensureMeeting(roomName, identity).then(setMeetingId); }, [roomName, identity]);
+  useEffect(() => { 
+    void ensureMeeting(roomName, identity).then((mId) => {
+      setMeetingId(mId);
+      if (mId && hasJoinedRoomRef.current) {
+        void recordParticipantJoin(mId, resolvedIsHost ?? false);
+      }
+    }); 
+  }, [roomName, identity, resolvedIsHost, recordParticipantJoin]);
 
   /* DM sender */
   const [dmLocalParticipant, setDmLocalParticipant] = useState<any>(null);
@@ -1226,27 +1320,43 @@ export function LiveMeetingRoom({ roomName, identity, title = "Meeting", startWi
   }, [dmLocalParticipant]);
 
   /* Host end meeting */
-  const endMeeting = useCallback(() => {
-    if (!isHost || !dmLocalParticipant) return;
+  const endMeeting = useCallback(async () => {
+    if (!(resolvedIsHost ?? false) || !dmLocalParticipant) return;
+    
+    // Update meeting status in Supabase
+    if (meetingId) {
+      await supabase
+        .from("meetings")
+        .update({ 
+          status: "ended", 
+          is_active: false, 
+          ended_at: new Date().toISOString() 
+        })
+        .eq("id", meetingId);
+    }
+
     // Broadcast end meeting to all participants
     const payload = JSON.stringify({ type: "end-meeting", from: identity, timestamp: Date.now() });
     try { void dmLocalParticipant.publishData(new TextEncoder().encode(payload), { reliable: true, topic: "meeting-control" }); }
     catch { /* ignore */ }
     setShowSummary(true);
-  }, [isHost, dmLocalParticipant, identity]);
+  }, [resolvedIsHost, dmLocalParticipant, identity, meetingId]);
 
   const handleLeave = useCallback(() => {
-    if (isHost) {
-      endMeeting();
+    if (resolvedIsHost ?? false) {
+      void endMeeting();
     } else {
       setShowSummary(true);
     }
-  }, [isHost, endMeeting]);
+  }, [resolvedIsHost, endMeeting]);
 
   const handleLiveKitConnected = useCallback(() => {
     hasJoinedRoomRef.current = true;
     setConnectionError(null);
-  }, []);
+    if (meetingId) {
+      void recordParticipantJoin(meetingId, resolvedIsHost ?? false);
+    }
+  }, [meetingId, resolvedIsHost, recordParticipantJoin]);
 
   const handleLiveKitDisconnected = useCallback(() => {
     if (hasJoinedRoomRef.current) setShowSummary(true);
@@ -1263,7 +1373,7 @@ export function LiveMeetingRoom({ roomName, identity, title = "Meeting", startWi
 
   // Listen for host ending meeting
   useEffect(() => {
-    if (isHost || !dmLocalParticipant) return;
+    if ((resolvedIsHost ?? false) || !dmLocalParticipant) return;
     const room = dmLocalParticipant.room;
     if (!room) return;
     
@@ -1280,7 +1390,7 @@ export function LiveMeetingRoom({ roomName, identity, title = "Meeting", startWi
     
     room.on(RoomEvent.DataReceived, handler);
     return () => { room.off(RoomEvent.DataReceived, handler); };
-  }, [isHost, dmLocalParticipant, identity, addToast]);
+  }, [resolvedIsHost, dmLocalParticipant, identity, addToast]);
 
   /* Token fetch */
   useEffect(() => {
@@ -1289,12 +1399,12 @@ export function LiveMeetingRoom({ roomName, identity, title = "Meeting", startWi
     setTokenData(null);
     setTokenError(null);
     setConnectionError(null);
-    fetch(`/api/livekit/token?room=${encodeURIComponent(roomName)}&identity=${encodeURIComponent(identity)}&host=${isHost ? "1" : "0"}`, { signal: controller.signal })
+    fetch(`/api/livekit/token?room=${encodeURIComponent(roomName)}&identity=${encodeURIComponent(identity)}&host=${resolvedIsHost ? "1" : "0"}`, { signal: controller.signal })
       .then((res) => { if (!res.ok) throw new Error("Could not get token"); return res.json(); })
       .then((d) => setTokenData(d as TokenResponse))
       .catch((e) => { if (e?.name !== "AbortError") setTokenError(e instanceof Error ? e.message : String(e)); });
     return () => controller.abort();
-  }, [identity, roomName, isHost]);
+  }, [identity, roomName, resolvedIsHost]);
 
   const speechRecognitionAvailable = typeof window !== "undefined" && Boolean((window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition);
 
@@ -1303,12 +1413,12 @@ export function LiveMeetingRoom({ roomName, identity, title = "Meeting", startWi
       captions={captions} 
       roomName={roomName} 
       meetingId={meetingId} 
-      isHost={isHost}
+      isHost={resolvedIsHost ?? false}
       onClose={() => { window.location.href = "/meeting"; }} 
     />
   );
 
-  if (!tokenData && !tokenError && !connectionError) {
+  if ((resolvedIsHost === null || !tokenData) && !tokenError && !connectionError) {
     return (
       <div className="h-screen w-full bg-[#09090e] flex items-center justify-center">
         <div className="text-center space-y-4">
@@ -1349,7 +1459,7 @@ export function LiveMeetingRoom({ roomName, identity, title = "Meeting", startWi
         >
           <LocalParticipantCapture onReady={setDmLocalParticipant} />
 
-          <NotificationSystem onToast={addToast} onDMReceived={handleDMReceived} localIdentity={identity} isHost={isHost} />
+          <NotificationSystem onToast={addToast} onDMReceived={handleDMReceived} localIdentity={identity} isHost={resolvedIsHost ?? false} />
           <RoomTranscriptionController
             sttDisabled={STT_DISABLED} sttLang={DEFAULT_STT_LANG} sttChunkMs={DEFAULT_STT_CHUNK_MS}
             speechRecognitionAvailable={speechRecognitionAvailable} sttProviderOrder={DEFAULT_STT_ORDER}
@@ -1378,7 +1488,7 @@ export function LiveMeetingRoom({ roomName, identity, title = "Meeting", startWi
                 onDeviceError={(e) => setDeviceError(e?.message ?? null)}
                 isFullscreen={isFullscreen} onToggleFullscreen={toggleFullscreen}
                 viewMode={viewMode} onToggleView={() => { setViewMode((v) => v === "grid" ? "speaker" : "grid"); setFocusedIdentity(null); }}
-                isHost={isHost}
+                isHost={resolvedIsHost ?? false}
                 onEndMeeting={endMeeting}
                 onLeave={handleLeave}
               />
