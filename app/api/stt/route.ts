@@ -94,9 +94,9 @@ async function transcribeWithWhisper(params: {
 
         // Filter Groq Whisper hallucinations
         const hallucinations = [
-          "subtitles by amara.org", "thank you.", "thank you", "s.", "thanks", "bye.", "bye",
+          "subtitles by amara.org", "s.", "bye.", "bye",
           "please subscribe", "subscribe to my channel", "subtitles by", "amara.org",
-          "you", "to be continued", "to be continued.", "that's it."
+          "you", "to be contiued", "to be contiued.", "that's it."
         ];
         if (hallucinations.includes(t.toLowerCase())) return "";
 
@@ -129,9 +129,9 @@ async function transcribeWithWhisper(params: {
 
   // Filter out notorious Whisper hallucinations on silent/noisy chunks
   const hallucinations = [
-    "subtitles by amara.org", "thank you.", "thank you", "thanks.", "thanks", "bye.", "bye",
-    "please subscribe", "subscribe to my channel", "subtitles by", "amara.org",
-    "you", "to be continued", "to be continued.", "that's it."
+    "subtitles by amara.org", "bye.", "bye",
+    "please subscrib", "subscrib to my channel", "subtitles by", "amara.org",
+    "you", "to be contiued", "to be contiued.", "tha's it."
   ];
   if (hallucinations.includes(t.toLowerCase())) return "";
 
