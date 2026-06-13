@@ -350,7 +350,7 @@ export function PreJoinScreen({ roomName }: PreJoinScreenProps) {
                   <label className="block text-xs font-semibold text-white/50 uppercase tracking-wider mb-2">
                     Meeting type
                   </label>
-                  <div className="grid grid-cols-2 gap-1.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                     {([
                       { value: 'general', label: '📝 General' },
                       { value: 'board', label: '🏛️ Board' },

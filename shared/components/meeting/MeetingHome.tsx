@@ -219,14 +219,14 @@ function MeetingHomeInner() {
           </p>
         </div>
         <button type="button" onClick={startNewMeeting}
-          className="hidden sm:flex items-center gap-2 h-11 rounded-xl bg-blue-600 px-5 text-sm font-semibold text-white hover:bg-blue-700 active:scale-95 transition shrink-0">
+          className="flex items-center justify-center gap-2 h-11 w-11 sm:w-auto rounded-xl bg-blue-600 sm:px-5 text-sm font-semibold text-white hover:bg-blue-700 active:scale-95 transition shrink-0">
           <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
-          New meeting
+          <span className="hidden sm:inline">New meeting</span>
         </button>
       </div>
 
       {/* ── Metrics ──────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-3 gap-3 sm:gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
         <MetricCard label="Meetings" value={metrics.meetings} loading={loadingMetrics}
           icon={<svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M15 10l4.553-2.277A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14" /><rect x="3" y="8" width="12" height="10" rx="2" /></svg>} />
         <MetricCard label="Transcripts" value={metrics.transcripts} loading={loadingMetrics}

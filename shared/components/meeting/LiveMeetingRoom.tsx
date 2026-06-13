@@ -210,7 +210,7 @@ function MeetingStage({
   const count = cameraTracks.length;
   const isScreenSharing = screenTracks.length > 0;
 
-  const gridCols = count === 1 ? "grid-cols-1" : count === 2 ? "grid-cols-2" : count <= 4 ? "grid-cols-2" : count <= 6 ? "grid-cols-3" : "grid-cols-4";
+  const gridCols = count === 1 ? "grid-cols-1" : count === 2 ? "grid-cols-1 sm:grid-cols-2" : count <= 4 ? "grid-cols-2" : count <= 6 ? "grid-cols-2 sm:grid-cols-3" : "grid-cols-2 sm:grid-cols-3 md:grid-cols-4";
 
   if (isScreenSharing) {
     return (
@@ -1096,14 +1096,14 @@ function MeetingSummaryDashboard({ captions, roomName, onClose, meetingId, isHos
               {summaryText && (
                 <>
                   <button onClick={() => { navigator.clipboard.writeText(summaryText); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
-                    className="h-8 rounded-xl border border-white/[0.08] bg-white/5 px-3 text-xs text-white/60 hover:text-white hover:bg-white/10 transition hidden sm:inline-flex">
+                    className="h-8 rounded-xl border border-white/[0.08] bg-white/5 px-3 text-xs text-white/60 hover:text-white hover:bg-white/10 transition inline-flex">
                     {copied ? "Copied!" : "Copy"}
                   </button>
                   <button onClick={() => { const b = new Blob([summaryText], { type: "text/markdown" }); const u = URL.createObjectURL(b); const a = document.createElement("a"); a.href = u; a.download = `minutes_${roomName}.md`; a.click(); URL.revokeObjectURL(u); }}
                     className="h-8 rounded-xl border border-white/[0.08] bg-white/5 px-3 text-xs text-white/60 hover:text-white hover:bg-white/10 transition">
                     Download .md
                   </button>
-                  <button onClick={() => { setSaved(false); void generate(true); }} className="h-8 rounded-xl border border-blue-500/30 bg-blue-500/10 px-3 text-xs text-blue-300 hover:text-white hover:bg-blue-500/20 transition hidden sm:inline-flex">
+                  <button onClick={() => { setSaved(false); void generate(true); }} className="h-8 rounded-xl border border-blue-500/30 bg-blue-500/10 px-3 text-xs text-blue-300 hover:text-white hover:bg-blue-500/20 transition inline-flex">
                     Regenerate
                   </button>
                 </>
