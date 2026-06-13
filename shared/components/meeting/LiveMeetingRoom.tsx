@@ -720,55 +720,71 @@ function RoomTranscriptionController({ sttDisabled, sttLang, sttChunkMs, speechR
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       if (cancelledRef.current) { stream.getTracks().forEach((t) => t.stop()); throw new Error("Cancelled"); }
       streamRef.current = stream;
-      const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"].find((t) => MediaRecorder.isTypeSupported(t));
-      const recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
-      recorderRef.current = recorder;
+      
+      const mime = [
+        "audio/webm;codecs=opus", 
+        "audio/webm", 
+        "audio/ogg;codecs=opus",
+        "audio/mp4"
+      ].find((t) => MediaRecorder.isTypeSupported(t));
       
       const failures = { count: 0 };
       const MAX_FAILURES = 3;
+      let currentRecorder: MediaRecorder | null = null;
+      let recordingTimeout: ReturnType<typeof setTimeout> | null = null;
 
-      recorder.ondataavailable = (e) => {
-        if (!e.data?.size || cancelledRef.current) return;
-        const chunkBlob = e.data;
-        processingQueueRef.current = processingQueueRef.current.then(async () => {
-          if (cancelledRef.current || activeProviderRef.current !== provider) return;
-          try {
-            const text = await transcribeChunk(provider, chunkBlob);
-            if (text && !cancelledRef.current) { 
-              finalize(text); 
-              onInterimChange(""); 
-              failures.count = 0; 
+      const recordChunk = () => {
+        if (cancelledRef.current) return;
+        try {
+          const recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+          currentRecorder = recorder;
+          recorder.ondataavailable = (e) => {
+            if (!e.data?.size || cancelledRef.current) return;
+            const chunkBlob = e.data;
+            processingQueueRef.current = processingQueueRef.current.then(async () => {
+              if (cancelledRef.current || activeProviderRef.current !== provider) return;
+              try {
+                const text = await transcribeChunk(provider, chunkBlob);
+                if (text && !cancelledRef.current) { 
+                  finalize(text); 
+                  onInterimChange(""); 
+                  failures.count = 0; 
+                }
+              } catch (err) {
+                if (cancelledRef.current) return;
+                failures.count++;
+                onErrorChange(err instanceof Error ? err.message : String(err));
+                if (failures.count >= MAX_FAILURES) {
+                  failures.count = 0;
+                  setTimeout(() => { if (!cancelledRef.current) activate(currentProviderIndex + 1); }, 0);
+                }
+              }
+            });
+          };
+          recorder.start();
+          recordingTimeout = setTimeout(() => {
+            if (recorder.state !== "inactive") {
+              try { recorder.stop(); } catch { /* ignore */ }
             }
-          } catch (err) {
-            if (cancelledRef.current) return;
-            failures.count++;
+            recordChunk(); // Start next chunk
+          }, sttChunkMs);
+        } catch (err) {
+          if (!cancelledRef.current) {
             onErrorChange(err instanceof Error ? err.message : String(err));
-            if (failures.count >= MAX_FAILURES) {
-              failures.count = 0;
-              // Schedule fallback on next tick to avoid nesting
-              setTimeout(() => {
-                if (!cancelledRef.current) activate(currentProviderIndex + 1);
-              }, 0);
-            }
+            setTimeout(() => { activate(currentProviderIndex + 1); }, 0);
           }
-        });
+        }
       };
 
-      recorder.start();
-      const id = setInterval(() => {
-        if (cancelledRef.current) { clearInterval(id); return; }
-        try { 
-          if (recorder.state === "recording") { 
-            recorder.requestData(); 
-          } 
-        } catch { /* ignore */ }
-      }, sttChunkMs);
+      recordChunk();
 
       return () => { 
-        clearInterval(id); 
-        recorderRef.current = null;
-        recorder.ondataavailable = null;
-        try { if (recorder.state !== "inactive") recorder.stop(); } catch { /* ignore */ }
+        if (recordingTimeout) clearTimeout(recordingTimeout);
+        if (currentRecorder && currentRecorder.state !== "inactive") {
+          currentRecorder.ondataavailable = null;
+          try { currentRecorder.stop(); } catch { /* ignore */ }
+        }
+        currentRecorder = null;
         const s = streamRef.current;
         if (s) { streamRef.current = null; try { s.getTracks().forEach((t) => t.stop()); } catch { /* ignore */ } }
       };

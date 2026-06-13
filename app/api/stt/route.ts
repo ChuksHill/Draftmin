@@ -69,7 +69,11 @@ async function transcribeWithWhisper(params: {
     form.set("response_format", "json");
     form.set("prompt", "This is a professional meeting or conversation. Use proper punctuation, capitalize names and acronyms.");
     if (params.langBase) form.set("language", params.langBase);
-    const file = new File([params.audio], "audio.webm", { type: params.contentType || "audio/webm" });
+    
+    // Whisper relies heavily on the file extension to determine the decoder
+    const ext = params.contentType.includes("mp4") ? "m4a" : params.contentType.includes("ogg") ? "ogg" : "webm";
+    const file = new File([params.audio], `audio.${ext}`, { type: params.contentType || "audio/webm" });
+    
     form.set("file", file);
     return form;
   };
