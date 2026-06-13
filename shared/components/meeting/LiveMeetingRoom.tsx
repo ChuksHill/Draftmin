@@ -42,7 +42,7 @@ function parsePosInt(v?: string | null, fb = 4000) {
 }
 const DEFAULT_STT_ORDER = parseSttOrder(process.env.NEXT_PUBLIC_STT_PROVIDER_ORDER);
 const DEFAULT_STT_LANG = (process.env.NEXT_PUBLIC_STT_LANG ?? "en-US").trim() || "en-US";
-const DEFAULT_STT_CHUNK_MS = parsePosInt(process.env.NEXT_PUBLIC_STT_CHUNK_MS, 4000);
+const DEFAULT_STT_CHUNK_MS = parsePosInt(process.env.NEXT_PUBLIC_STT_CHUNK_MS, 10000);
 const STT_DISABLED = Boolean((process.env.NEXT_PUBLIC_STT_DISABLED ?? "").trim());
 
 export type LiveMeetingRoomProps = {

@@ -69,11 +69,11 @@ async function transcribeWithWhisper(params: {
     form.set("response_format", "json");
     form.set("prompt", "This is a professional meeting or conversation. Use proper punctuation, capitalize names and acronyms.");
     if (params.langBase) form.set("language", params.langBase);
-    
+
     // Whisper relies heavily on the file extension to determine the decoder
     const ext = params.contentType.includes("mp4") ? "m4a" : params.contentType.includes("ogg") ? "ogg" : "webm";
     const file = new File([params.audio], `audio.${ext}`, { type: params.contentType || "audio/webm" });
-    
+
     form.set("file", file);
     return form;
   };
@@ -90,7 +90,17 @@ async function transcribeWithWhisper(params: {
       });
       if (res.ok) {
         const data = (await res.json()) as { text?: string };
-        return data.text?.trim() ?? "";
+        const t = data.text?.trim() ?? "";
+
+        // Filter Groq Whisper hallucinations
+        const hallucinations = [
+          "subtitles by amara.org", "thank you.", "thank you", "s.", "thanks", "bye.", "bye",
+          "please subscribe", "subscribe to my channel", "subtitles by", "amara.org",
+          "you", "to be continued", "to be continued.", "that's it."
+        ];
+        if (hallucinations.includes(t.toLowerCase())) return "";
+
+        return t;
       }
       console.warn(`Groq Whisper (${res.status}), falling back to OpenAI.`);
     } catch (e) {
@@ -115,7 +125,17 @@ async function transcribeWithWhisper(params: {
   }
 
   const data = (await res.json()) as { text?: string };
-  return data.text?.trim() ?? "";
+  const t = data.text?.trim() ?? "";
+
+  // Filter out notorious Whisper hallucinations on silent/noisy chunks
+  const hallucinations = [
+    "subtitles by amara.org", "thank you.", "thank you", "thanks.", "thanks", "bye.", "bye",
+    "please subscribe", "subscribe to my channel", "subtitles by", "amara.org",
+    "you", "to be continued", "to be continued.", "that's it."
+  ];
+  if (hallucinations.includes(t.toLowerCase())) return "";
+
+  return t;
 }
 
 export async function POST(request: Request) {
@@ -138,8 +158,8 @@ export async function POST(request: Request) {
 
     const providerOrder: SttProvider[] =
       requestedProvider ? [requestedProvider]
-      : envOrder.length > 0 ? envOrder
-      : ["deepgram", "whisper"];
+        : envOrder.length > 0 ? envOrder
+          : ["deepgram", "whisper"];
 
     const audio = await request.arrayBuffer();
     if (audio.byteLength === 0) {
@@ -147,7 +167,7 @@ export async function POST(request: Request) {
     }
 
     const errors: { provider: SttProvider; message: string }[] = [];
-    
+
     for (const provider of providerOrder) {
       try {
         const text =

@@ -148,10 +148,22 @@ function MeetingHomeInner() {
   useEffect(() => {
     async function loadRecent() {
       try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) { setLoadingRecent(false); return; }
+
         const { data, error } = await supabase
-          .from("meetings").select("id, room_name, title, created_at")
-          .order("created_at", { ascending: false }).limit(6);
-        if (!error && data) setRecentMeetings(data);
+          .from("meetings")
+          .select("id, room_name, title, created_at, meeting_participants!inner(user_id)")
+          .eq("meeting_participants.user_id", user.id)
+          .order("created_at", { ascending: false })
+          .limit(6);
+          
+        if (!error && data) {
+          // Map to remove the nested meeting_participants array from the type
+          setRecentMeetings(data.map(m => ({
+            id: m.id, room_name: m.room_name, title: m.title, created_at: m.created_at
+          })));
+        }
       } catch { /* ignore */ } finally { setLoadingRecent(false); }
     }
     void loadRecent();
@@ -160,14 +172,27 @@ function MeetingHomeInner() {
   useEffect(() => {
     async function loadMetrics() {
       try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) { setLoadingMetrics(false); return; }
+
         const now = new Date();
         const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-        const [{ count: m }, { count: t }, { count: s }] = await Promise.all([
-          supabase.from("meetings").select("*", { count: "exact", head: true }).gte("created_at", startOfMonth),
-          supabase.from("transcripts").select("*", { count: "exact", head: true }).gte("created_at", startOfMonth),
-          supabase.from("meeting_summaries").select("*", { count: "exact", head: true }).gte("created_at", startOfMonth),
-        ]);
-        setMetrics({ meetings: m ?? 0, transcripts: t ?? 0, summaries: s ?? 0 });
+        
+        // My meetings
+        const { count: m } = await supabase
+          .from("meeting_participants")
+          .select("*", { count: "exact", head: true })
+          .eq("user_id", user.id)
+          .gte("joined_at", startOfMonth);
+
+        // Summaries for my meetings
+        const { count: s } = await supabase
+          .from("meeting_summaries")
+          .select("id, meetings!inner(meeting_participants!inner(user_id))", { count: "exact", head: true })
+          .eq("meetings.meeting_participants.user_id", user.id)
+          .gte("created_at", startOfMonth);
+
+        setMetrics({ meetings: m ?? 0, transcripts: 0, summaries: s ?? 0 });
       } catch { /* ignore */ } finally { setLoadingMetrics(false); }
     }
     void loadMetrics();
