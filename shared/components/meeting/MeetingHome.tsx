@@ -12,29 +12,163 @@ function initialsFromName(name: string) {
   return ((parts[0]?.[0] ?? "U") + (parts.length > 1 ? parts[parts.length - 1]?.[0] ?? "" : "")).toUpperCase();
 }
 
-function generateRoomName(): string {
-  const adj = ["swift","bright","calm","deep","bold","clear","sharp","steady","grand","silent"];
-  const noun = ["river","summit","valley","forest","harbor","bridge","canyon","meadow","peak","lake"];
-  return `${adj[Math.floor(Math.random()*adj.length)]}-${noun[Math.floor(Math.random()*noun.length)]}-${Math.floor(1000+Math.random()*9000)}`;
+function slugify(name: string): string {
+  return (
+    name
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9\s-]/g, "")
+      .replace(/\s+/g, "-")
+      .replace(/-+/g, "-")
+      .slice(0, 48) || "my-meeting"
+  );
 }
 
 function getGreeting(name: string) {
   const h = new Date().getHours();
   const time = h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
-  return `${time}, ${name || "there"}`;
+  return { time, name: name || "there" };
 }
 
-type RecentMeeting = { id: string; room_name: string; title: string; created_at: string };
+const MEETING_TYPES = [
+  { value: "general", label: "📝 General" },
+  { value: "board", label: "🏛️ Board" },
+  { value: "standup", label: "⚡ Stand-up" },
+  { value: "retro", label: "🔄 Retrospective" },
+  { value: "workshop", label: "🛠️ Workshop" },
+  { value: "client", label: "🤝 Client" },
+] as const;
+type MeetingTypeValue = typeof MEETING_TYPES[number]["value"];
+
+type RecentMeeting = {
+  id: string;
+  room_name: string;
+  title: string;
+  created_at: string;
+  _has_summary?: boolean;
+};
 type Metrics = { meetings: number; transcripts: number; summaries: number };
 
 const CHECKLIST_KEY = "draftmin.onboarding";
 type ChecklistItem = { id: string; label: string; detail: string };
 const CHECKLIST: ChecklistItem[] = [
-  { id: "first_meeting",   label: "Start your first meeting",       detail: "Click \"Start new meeting\" and invite a colleague." },
-  { id: "enable_captions", label: "Enable live captions",          detail: "Open the Captions panel inside any meeting." },
-  { id: "view_summary",    label: "Read your first AI summary",    detail: "End a meeting — your minutes are generated automatically." },
+  { id: "first_meeting", label: "Start your first meeting", detail: 'Click "New meeting" and give it a name.' },
+  { id: "enable_captions", label: "Enable live captions", detail: "Open the Captions panel inside any meeting." },
+  { id: "view_summary", label: "Read your first AI summary", detail: "End a meeting — your minutes are generated automatically." },
 ];
 
+/* ── New Meeting Modal ──────────────────────────────────────────────────── */
+function NewMeetingModal({ onClose }: { onClose: () => void }) {
+  const router = useRouter();
+  const [meetingTitle, setMeetingTitle] = useState("");
+  const [meetingType, setMeetingType] = useState<MeetingTypeValue>("general");
+  const [error, setError] = useState("");
+
+  const slug = slugify(meetingTitle || "");
+
+  const handleCreate = () => {
+    const title = meetingTitle.trim();
+    if (!title) { setError("Please enter a meeting name."); return; }
+    window.localStorage.setItem("draftmin.meetingType", meetingType);
+    router.push(
+      `/meeting/${encodeURIComponent(slug)}/prejoin?host=1&title=${encodeURIComponent(title)}&type=${meetingType}`
+    );
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-5 bg-stone-900/40 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-md rounded-3xl bg-white p-7 space-y-5 shadow-xl"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-medium text-stone-900">New meeting</h2>
+            <p className="text-sm text-stone-400 mt-0.5">Give your meeting a name and choose a type.</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="h-8 w-8 rounded-full bg-stone-100 grid place-items-center text-stone-400 hover:text-stone-700 hover:bg-stone-200 transition shrink-0"
+          >
+            <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <path d="M6 6l12 12M18 6 6 18" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Meeting name */}
+        <div>
+          <label className="block text-xs font-medium text-stone-500 uppercase tracking-wide mb-2">
+            Meeting name <span className="text-red-400">*</span>
+          </label>
+          <input
+            autoFocus
+            value={meetingTitle}
+            onChange={e => { setMeetingTitle(e.target.value); setError(""); }}
+            onKeyDown={e => e.key === "Enter" && handleCreate()}
+            placeholder="e.g. Q3 Planning, Team Standup…"
+            className="h-12 w-full rounded-2xl border border-stone-200 bg-stone-50 px-4 text-sm text-stone-900 placeholder:text-stone-300 outline-none focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-100 transition"
+          />
+          {meetingTitle && (
+            <p className="text-[11px] text-stone-400 mt-2 font-mono">
+              Room: <span className="text-stone-600">{slug}</span>
+            </p>
+          )}
+          {error && <p className="text-xs text-red-400 mt-1">{error}</p>}
+        </div>
+
+        {/* Meeting type */}
+        <div>
+          <label className="block text-xs font-medium text-stone-500 uppercase tracking-wide mb-2">
+            Type
+          </label>
+          <div className="relative">
+            <select
+              value={meetingType}
+              onChange={e => setMeetingType(e.target.value as MeetingTypeValue)}
+              className="h-12 w-full rounded-2xl border border-stone-200 bg-stone-50 px-4 pr-10 text-sm text-stone-900 outline-none focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-100 transition appearance-none cursor-pointer"
+            >
+              {MEETING_TYPES.map(t => (
+                <option key={t.value} value={t.value}>{t.label}</option>
+              ))}
+            </select>
+            <svg viewBox="0 0 24 24" fill="none" className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 text-stone-400 pointer-events-none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <path d="M6 9l6 6 6-6" />
+            </svg>
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="flex gap-3 pt-1">
+          <button
+            type="button"
+            onClick={onClose}
+            className="h-12 flex-1 rounded-full bg-stone-100 text-sm font-medium text-stone-600 hover:bg-stone-200 transition"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleCreate}
+            className="h-12 flex-1 rounded-full bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-sm font-medium text-white transition flex items-center justify-center gap-2"
+          >
+            <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            Create meeting
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Onboarding Checklist ───────────────────────────────────────────────── */
 function OnboardingChecklist({ onDismiss }: { onDismiss: () => void }) {
   const [done, setDone] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem(CHECKLIST_KEY) ?? "[]"); } catch { return []; }
@@ -47,43 +181,65 @@ function OnboardingChecklist({ onDismiss }: { onDismiss: () => void }) {
   };
 
   const allDone = CHECKLIST.every(c => done.includes(c.id));
+  const pct = Math.round((done.length / CHECKLIST.length) * 100);
 
   return (
-    <div className="rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50 to-indigo-50 p-5">
-      <div className="flex items-start justify-between gap-3 mb-4">
+    <div className="rounded-2xl bg-stone-100 p-5">
+      <div className="flex items-start justify-between gap-3 mb-3">
         <div>
-          <div className="text-sm font-semibold text-slate-800">Getting started</div>
-          <div className="text-xs text-slate-500 mt-0.5">{done.length} of {CHECKLIST.length} complete</div>
+          <div className="text-sm font-medium text-stone-800">Getting started</div>
+          <div className="text-xs text-stone-400 mt-0.5">{done.length} of {CHECKLIST.length} done</div>
         </div>
-        <button type="button" onClick={onDismiss}
-          className="text-slate-400 hover:text-slate-600 transition text-xs underline shrink-0">
+        <button
+          type="button"
+          onClick={onDismiss}
+          className="text-xs text-stone-400 hover:text-stone-600 underline shrink-0 transition"
+        >
           Dismiss
         </button>
       </div>
+
       {/* Progress bar */}
-      <div className="h-1.5 w-full rounded-full bg-blue-100 mb-4 overflow-hidden">
-        <div className="h-full rounded-full bg-blue-500 transition-all duration-500"
-          style={{ width: `${(done.length / CHECKLIST.length) * 100}%` }} />
+      <div className="h-1 w-full rounded-full bg-stone-200 mb-4 overflow-hidden">
+        <div
+          className="h-full rounded-full bg-blue-600 transition-all duration-500"
+          style={{ width: `${pct}%` }}
+        />
       </div>
-      <div className="space-y-2.5">
+
+      <div className="space-y-2">
         {CHECKLIST.map(item => {
           const checked = done.includes(item.id);
           return (
-            <button key={item.id} type="button" onClick={() => toggle(item.id)}
-              className="flex items-start gap-3 w-full text-left rounded-xl p-3 bg-white/70 hover:bg-white border border-white/80 hover:border-blue-200 transition group">
-              <div className={`mt-0.5 h-5 w-5 rounded-full border-2 flex items-center justify-center shrink-0 transition ${checked ? "border-blue-500 bg-blue-500" : "border-slate-300 group-hover:border-blue-300"}`}>
-                {checked && <svg viewBox="0 0 24 24" fill="none" className="h-3 w-3 text-white" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><polyline points="20 6 9 17 4 12" /></svg>}
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => toggle(item.id)}
+              className="flex items-start gap-3 w-full text-left rounded-xl p-3 bg-white hover:border-blue-200 border border-transparent transition group"
+            >
+              <div
+                className={`mt-0.5 h-5 w-5 rounded-full border-2 flex items-center justify-center shrink-0 transition ${checked ? "border-blue-600 bg-blue-600" : "border-stone-300 group-hover:border-blue-300"
+                  }`}
+              >
+                {checked && (
+                  <svg viewBox="0 0 24 24" fill="none" className="h-3 w-3 text-white" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                )}
               </div>
               <div className="min-w-0">
-                <div className={`text-sm font-medium ${checked ? "text-slate-400 line-through" : "text-slate-800"}`}>{item.label}</div>
-                <div className="text-xs text-slate-400 mt-0.5 leading-relaxed">{item.detail}</div>
+                <div className={`text-sm font-medium ${checked ? "text-stone-400 line-through" : "text-stone-800"}`}>
+                  {item.label}
+                </div>
+                <div className="text-xs text-stone-400 mt-0.5 leading-relaxed">{item.detail}</div>
               </div>
             </button>
           );
         })}
       </div>
+
       {allDone && (
-        <div className="mt-3 text-center text-xs text-emerald-600 font-medium bg-emerald-50 rounded-xl py-2 border border-emerald-100">
+        <div className="mt-3 text-center text-xs text-emerald-700 font-medium bg-emerald-50 rounded-xl py-2 border border-emerald-100">
           🎉 You&apos;re all set! Draftmin is ready to use.
         </div>
       )}
@@ -91,21 +247,53 @@ function OnboardingChecklist({ onDismiss }: { onDismiss: () => void }) {
   );
 }
 
-function MetricCard({ label, value, icon, loading }: { label: string; value: number; icon: React.ReactNode; loading: boolean }) {
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm px-5 py-4">
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-medium text-slate-500">{label}</span>
-        <span className="text-slate-300">{icon}</span>
+/* ── Metric Card ────────────────────────────────────────────────────────── */
+function MetricCard({
+  label,
+  value,
+  loading,
+  href,
+}: {
+  label: string;
+  value: number;
+  loading: boolean;
+  href?: string;
+}) {
+  const router = useRouter();
+  const base =
+    "rounded-2xl bg-white border border-stone-100 px-6 py-5 text-left w-full group";
+
+  const inner = (
+    <>
+      {loading ? (
+        <div className="h-9 w-14 rounded-xl bg-stone-100 animate-pulse mb-2" />
+      ) : (
+        <div className="text-3xl font-medium text-stone-900 tracking-tight leading-none mb-2">
+          {value}
+        </div>
+      )}
+      <div className="flex items-center gap-1.5">
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-blue-600 shrink-0" />
+        <span className="text-sm text-stone-400">{label} this month</span>
       </div>
-      {loading
-        ? <div className="h-7 w-12 rounded-lg bg-slate-100 animate-pulse" />
-        : <div className="text-2xl font-bold text-slate-900">{value}</div>}
-      <div className="text-[11px] text-slate-400 mt-0.5">this month</div>
-    </div>
+    </>
   );
+
+  if (href) {
+    return (
+      <button
+        type="button"
+        onClick={() => router.push(href)}
+        className={`${base} hover:-translate-y-0.5 hover:border-blue-100 transition-transform duration-150`}
+      >
+        {inner}
+      </button>
+    );
+  }
+  return <div className={base}>{inner}</div>;
 }
 
+/* ── Main Inner Component ───────────────────────────────────────────────── */
 function MeetingHomeInner() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
@@ -116,13 +304,14 @@ function MeetingHomeInner() {
   const [metrics, setMetrics] = useState<Metrics>({ meetings: 0, transcripts: 0, summaries: 0 });
   const [loadingMetrics, setLoadingMetrics] = useState(true);
   const [showChecklist, setShowChecklist] = useState(false);
+  const [showNewMeetingModal, setShowNewMeetingModal] = useState(false);
 
   const avatar = useMemo(() => initialsFromName(displayName || "Guest"), [displayName]);
+  const greeting = useMemo(() => getGreeting(displayName), [displayName]);
 
   useEffect(() => {
-    // Only show checklist if user hasn't dismissed it
     const dismissed = localStorage.getItem("draftmin.onboarding.dismissed");
-    if (!dismissed) setShowChecklist(true);
+    if (!dismissed) setTimeout(() => setShowChecklist(true), 0);
   }, []);
 
   const dismissChecklist = () => {
@@ -135,7 +324,8 @@ function MeetingHomeInner() {
       const u = data.session?.user ?? null;
       setUser(u);
       if (u) {
-        const name = u.user_metadata?.full_name ?? u.user_metadata?.name ?? u.email?.split("@")[0] ?? "Guest";
+        const name =
+          u.user_metadata?.full_name ?? u.user_metadata?.name ?? u.email?.split("@")[0] ?? "Guest";
         setDisplayName(name);
         window.localStorage.setItem("draftmin.displayName", name);
       } else {
@@ -157,12 +347,24 @@ function MeetingHomeInner() {
           .eq("meeting_participants.user_id", user.id)
           .order("created_at", { ascending: false })
           .limit(6);
-          
+
         if (!error && data) {
-          // Map to remove the nested meeting_participants array from the type
-          setRecentMeetings(data.map(m => ({
-            id: m.id, room_name: m.room_name, title: m.title, created_at: m.created_at
-          })));
+          const enriched = await Promise.all(
+            data.map(async m => {
+              const { count } = await supabase
+                .from("meeting_summaries")
+                .select("*", { count: "exact", head: true })
+                .eq("meeting_id", m.id);
+              return {
+                id: m.id,
+                room_name: m.room_name,
+                title: m.title,
+                created_at: m.created_at,
+                _has_summary: (count ?? 0) > 0,
+              };
+            })
+          );
+          setRecentMeetings(enriched);
         }
       } catch { /* ignore */ } finally { setLoadingRecent(false); }
     }
@@ -177,15 +379,13 @@ function MeetingHomeInner() {
 
         const now = new Date();
         const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-        
-        // My meetings
+
         const { count: m } = await supabase
           .from("meeting_participants")
           .select("*", { count: "exact", head: true })
           .eq("user_id", user.id)
           .gte("joined_at", startOfMonth);
 
-        // Summaries for my meetings
         const { count: s } = await supabase
           .from("meeting_summaries")
           .select("id, meetings!inner(meeting_participants!inner(user_id))", { count: "exact", head: true })
@@ -199,128 +399,251 @@ function MeetingHomeInner() {
   }, []);
 
   const goToPrejoin = useCallback((room: string) => {
-    const target = room.trim() || generateRoomName();
-    router.push(`/meeting/${encodeURIComponent(target)}/prejoin`);
-  }, [router]);
-
-  const startNewMeeting = useCallback(() => {
-    const room = generateRoomName();
-    router.push(`/meeting/${encodeURIComponent(room)}/prejoin?host=1`);
+    if (!room.trim()) return;
+    router.push(`/meeting/${encodeURIComponent(room.trim())}/prejoin`);
   }, [router]);
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
-      {/* ── Greeting ─────────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-slate-900">{getGreeting(displayName)}</h1>
-          <p className="text-sm text-slate-500 mt-0.5">
-            {new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
-          </p>
-        </div>
-        <button type="button" onClick={startNewMeeting}
-          className="flex items-center justify-center gap-2 h-11 w-11 sm:w-auto rounded-xl bg-blue-600 sm:px-5 text-sm font-semibold text-white hover:bg-blue-700 active:scale-95 transition shrink-0">
-          <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
-          <span className="hidden sm:inline">New meeting</span>
-        </button>
-      </div>
+    <div className="min-h-screen bg-stone-50">
+      <div className="mx-auto w-full max-w-[1280px] px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+        <div className="space-y-6 sm:space-y-7">
 
-      {/* ── Metrics ──────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
-        <MetricCard label="Meetings" value={metrics.meetings} loading={loadingMetrics}
-          icon={<svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M15 10l4.553-2.277A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14" /><rect x="3" y="8" width="12" height="10" rx="2" /></svg>} />
-        <MetricCard label="Transcripts" value={metrics.transcripts} loading={loadingMetrics}
-          icon={<svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 2a3 3 0 00-3 3v7a3 3 0 006 0V5a3 3 0 00-3-3z" /><path d="M19 10v1a7 7 0 01-14 0v-1" /></svg>} />
-        <MetricCard label="AI Summaries" value={metrics.summaries} loading={loadingMetrics}
-          icon={<svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /></svg>} />
-      </div>
-
-      <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
-        {/* ── Left column ────────────────────────────────────────────────── */}
-        <div className="space-y-5">
-          {/* Join / Start */}
-          <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-5">
-            <div className="text-sm font-semibold text-slate-900 mb-4">Start or join a meeting</div>
-            <div className="flex gap-2">
-              <input value={roomInput} onChange={e => setRoomInput(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && goToPrejoin(roomInput)}
-                placeholder="Paste a room name or meeting link…"
-                className="h-11 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm outline-none focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100 transition min-w-0" />
-              <button type="button" onClick={() => goToPrejoin(roomInput)}
-                className="h-11 rounded-xl bg-blue-600 px-5 text-sm font-semibold text-white hover:bg-blue-700 active:scale-95 transition whitespace-nowrap shrink-0">
-                Join
-              </button>
+          {/* ── Greeting ── */}
+          <div className="flex items-start justify-between gap-4 pt-1">
+            <div>
+              <h1 className="text-xl sm:text-2xl lg:text-3xl font-medium text-stone-900 tracking-tight">
+                {greeting.time},{" "}
+                <span className="text-blue-600">{greeting.name}</span>{" "}
+                <span aria-hidden="true">👋</span>
+              </h1>
+              <p className="text-xs sm:text-sm text-stone-400 mt-1 sm:mt-1.5">
+                {new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
+              </p>
             </div>
-            <p className="mt-2.5 text-xs text-slate-400">Enter a room name someone shared, or create your own below.</p>
-          </div>
-
-          {/* Recent meetings */}
-          <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-5">
-            <div className="text-sm font-semibold text-slate-900 mb-4">Recent meetings</div>
-            {loadingRecent ? (
-              <div className="space-y-2">
-                {[1, 2, 3].map(i => <div key={i} className="h-14 rounded-xl bg-slate-100 animate-pulse" />)}
-              </div>
-            ) : recentMeetings.length > 0 ? (
-              <div className="space-y-2">
-                {recentMeetings.map(m => (
-                  <button key={m.id} type="button" onClick={() => goToPrejoin(m.room_name)}
-                    className="w-full flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50 hover:bg-blue-50 hover:border-blue-200 px-4 py-3 text-left transition group">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-blue-100 to-indigo-100 grid place-items-center shrink-0">
-                        <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4 text-blue-600" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M15 10l4.553-2.277A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14" /><rect x="3" y="8" width="12" height="10" rx="2" /></svg>
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-sm font-medium text-slate-800 truncate group-hover:text-blue-700 transition">{m.title || m.room_name}</div>
-                        <div className="text-xs text-slate-400 font-mono mt-0.5 truncate">{m.room_name}</div>
-                      </div>
-                    </div>
-                    <div className="text-xs text-slate-400 shrink-0">
-                      {new Date(m.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 py-10 text-center">
-                <div className="h-10 w-10 rounded-xl bg-slate-100 grid place-items-center mx-auto mb-3">
-                  <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5 text-slate-400" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M15 10l4.553-2.277A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14" /><rect x="3" y="8" width="12" height="10" rx="2" /></svg>
-                </div>
-                <div className="text-sm font-semibold text-slate-600">No recent meetings</div>
-                <div className="mt-1 text-xs text-slate-400">Start a new meeting to see your history here.</div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* ── Right column ───────────────────────────────────────────────── */}
-        <div className="space-y-4">
-          {/* New meeting CTA */}
-          <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-5">
-            <div className="text-sm font-semibold text-slate-900 mb-1">New meeting</div>
-            <p className="text-xs text-slate-500 mb-4 leading-relaxed">Generate a unique room with a shareable invite link.</p>
-            <button type="button" onClick={startNewMeeting}
-              className="h-11 w-full rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 active:scale-[0.98] transition flex items-center justify-center gap-2">
-              <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
-              Start new meeting
+            <button
+              type="button"
+              onClick={() => setShowNewMeetingModal(true)}
+              className="flex items-center gap-1.5 sm:gap-2 h-9 sm:h-11 rounded-full bg-blue-600 px-3 sm:px-5 text-xs sm:text-sm font-medium text-white hover:bg-blue-700 active:scale-95 transition shrink-0 mt-0 sm:mt-1"
+            >
+              <svg viewBox="0 0 24 24" fill="none" className="h-3.5 w-3.5 sm:h-4 sm:w-4" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              <span className="hidden sm:inline">New meeting</span>
+              <span className="sm:hidden">New</span>
             </button>
           </div>
 
-          {/* Onboarding checklist (hidden after dismiss or all done) */}
-          {showChecklist && <OnboardingChecklist onDismiss={dismissChecklist} />}
+          {/* ── Metrics ── */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+            <MetricCard label="Meetings" value={metrics.meetings} loading={loadingMetrics} href="/meeting/list" />
+            <MetricCard label="Transcripts" value={metrics.transcripts} loading={loadingMetrics} />
+            <MetricCard label="AI summaries" value={metrics.summaries} loading={loadingMetrics} href="/meeting/summaries" />
+          </div>
 
-          {/* Profile card */}
-          <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-5">
-            <div className="flex items-center gap-3">
-              <div className="h-11 w-11 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white grid place-items-center text-base font-semibold shrink-0">
-                {avatar}
+          <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
+
+            {/* ── Left column ── */}
+            <div className="space-y-5">
+
+              {/* Join meeting */}
+              <div className="rounded-2xl bg-white border border-stone-100 p-4 sm:p-6">
+                <div className="text-base font-medium text-stone-900 mb-1">Join a meeting</div>
+                <p className="text-sm text-stone-400 mb-4 sm:mb-5 leading-relaxed">
+                  Paste a room name or link shared by your host.
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    value={roomInput}
+                    onChange={e => setRoomInput(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && goToPrejoin(roomInput)}
+                    placeholder="Room name or link…"
+                    className="h-10 sm:h-12 flex-1 rounded-full border border-stone-200 bg-stone-50 px-4 sm:px-5 text-sm text-stone-900 placeholder:text-stone-300 outline-none focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-100 transition min-w-0"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => goToPrejoin(roomInput)}
+                    disabled={!roomInput.trim()}
+                    className="h-10 sm:h-12 rounded-full bg-blue-600 px-4 sm:px-6 text-sm font-medium text-white hover:bg-blue-700 active:scale-95 disabled:opacity-35 transition whitespace-nowrap shrink-0"
+                  >
+                    Join →
+                  </button>
+                </div>
               </div>
-              <div className="min-w-0">
-                <div className="text-sm font-semibold text-slate-900 truncate">{displayName || "Guest"}</div>
-                <div className="text-xs text-slate-400 truncate mt-0.5">{user?.email ?? "Not signed in"}</div>
+
+              {/* Recent meetings */}
+              <div className="rounded-2xl bg-white border border-stone-100 p-4 sm:p-6">
+                <div className="flex items-center justify-between mb-4 sm:mb-5">
+                  <div className="text-base font-medium text-stone-900">Recent meetings</div>
+                  <button
+                    type="button"
+                    onClick={() => router.push("/meeting/list")}
+                    className="text-sm font-medium text-blue-600 hover:text-blue-700 transition"
+                  >
+                    View all →
+                  </button>
+                </div>
+
+                {loadingRecent ? (
+                  <div className="space-y-3">
+                    {[1, 2, 3].map(i => (
+                      <div key={i} className="h-14 rounded-xl bg-stone-100 animate-pulse" />
+                    ))}
+                  </div>
+                ) : recentMeetings.length > 0 ? (
+                  <div className="space-y-2">
+                    {recentMeetings.map(m => (
+                      <div key={m.id} className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => goToPrejoin(m.room_name)}
+                          className="flex-1 flex items-center gap-2 sm:gap-3 rounded-xl border border-stone-100 bg-stone-50 hover:bg-blue-50 hover:border-blue-100 px-3 sm:px-4 py-2 sm:py-3 text-left transition group min-w-0"
+                        >
+                          <div className="h-8 w-8 sm:h-9 sm:w-9 rounded-xl bg-blue-50 border border-blue-100 grid place-items-center shrink-0">
+                            <svg viewBox="0 0 24 24" fill="none" className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-blue-600" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                              <path d="M15 10l4.553-2.277A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14" />
+                              <rect x="3" y="8" width="12" height="10" rx="2" />
+                            </svg>
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="text-xs sm:text-sm font-medium text-stone-800 truncate group-hover:text-blue-700 transition">
+                              {m.title || m.room_name}
+                            </div>
+                            <div className="text-[10px] sm:text-xs text-stone-400 font-mono mt-0.5 truncate">{m.room_name}</div>
+                          </div>
+                          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                            {m._has_summary && (
+                              <span className="text-[9px] sm:text-[10px] font-medium text-blue-600 bg-blue-50 border border-blue-100 rounded-full px-2 sm:px-2.5 py-0.5">
+                                Summary
+                              </span>
+                            )}
+                            <span className="text-[10px] sm:text-xs text-stone-400">
+                              {new Date(m.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                            </span>
+                          </div>
+                        </button>
+                        {m._has_summary && (
+                          <button
+                            type="button"
+                            onClick={() => router.push("/meeting/summaries")}
+                            title="View AI minutes"
+                            className="h-8 w-8 sm:h-10 sm:w-10 rounded-xl border border-blue-100 bg-blue-50 grid place-items-center text-blue-600 hover:bg-blue-100 transition shrink-0"
+                          >
+                            <svg viewBox="0 0 24 24" fill="none" className="h-3.5 w-3.5 sm:h-4 sm:w-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                              <polyline points="14 2 14 8 20 8" />
+                              <line x1="16" y1="13" x2="8" y2="13" />
+                            </svg>
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-dashed border-stone-200 bg-stone-50 py-8 sm:py-12 text-center">
+                    <div className="h-8 w-8 sm:h-10 sm:w-10 rounded-xl bg-stone-100 grid place-items-center mx-auto mb-2 sm:mb-3">
+                      <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4 sm:h-5 sm:w-5 text-stone-300" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                        <path d="M15 10l4.553-2.277A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14" />
+                        <rect x="3" y="8" width="12" height="10" rx="2" />
+                      </svg>
+                    </div>
+                    <div className="text-sm font-medium text-stone-500">No meetings yet</div>
+                    <div className="mt-1 text-xs text-stone-400">Start one above and it'll show up here.</div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* ── Right column ── */}
+            <div className="space-y-4">
+
+              {/* Start meeting CTA — inverted blue card */}
+              <div className="rounded-2xl bg-blue-600 p-4 sm:p-6">
+                <div className="text-base font-medium text-white mb-1">Start a meeting</div>
+                <p className="text-xs sm:text-sm text-blue-200 mb-4 sm:mb-5 leading-relaxed">
+                  Create a named room and share the link with your team.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setShowNewMeetingModal(true)}
+                  className="h-10 sm:h-11 w-full rounded-full bg-white text-blue-600 text-sm font-medium hover:bg-blue-50 active:scale-[0.98] transition flex items-center justify-center gap-2"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" className="h-3.5 w-3.5 sm:h-4 sm:w-4" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M12 5v14M5 12h14" />
+                  </svg>
+                  New meeting
+                </button>
+              </div>
+
+              {/* Quick links */}
+              <div className="rounded-2xl bg-white border border-stone-100 p-4 sm:p-5">
+                <div className="text-xs font-medium text-stone-400 uppercase tracking-wider mb-3">Navigate</div>
+                {[
+                  {
+                    label: "All meetings",
+                    href: "/meeting/list",
+                    icon: (
+                      <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                        <path d="M15 10l4.553-2.277A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14" />
+                        <rect x="3" y="8" width="12" height="10" rx="2" />
+                      </svg>
+                    ),
+                  },
+                  {
+                    label: "AI Summaries",
+                    href: "/meeting/summaries",
+                    icon: (
+                      <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                        <polyline points="14 2 14 8 20 8" />
+                      </svg>
+                    ),
+                  },
+                  {
+                    label: "Recordings",
+                    href: "/meeting/recordings",
+                    icon: (
+                      <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                        <circle cx="12" cy="12" r="3" />
+                        <path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14" />
+                      </svg>
+                    ),
+                  },
+                ].map(link => (
+                  <button
+                    key={link.href}
+                    type="button"
+                    onClick={() => router.push(link.href)}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-stone-500 hover:bg-blue-50 hover:text-blue-700 transition group"
+                  >
+                    <span className="text-stone-300 group-hover:text-blue-500 transition">{link.icon}</span>
+                    {link.label}
+                    <svg viewBox="0 0 24 24" fill="none" className="h-3.5 w-3.5 ml-auto text-stone-300 group-hover:text-blue-400 transition" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                      <path d="M9 18l6-6-6-6" />
+                    </svg>
+                  </button>
+                ))}
+              </div>
+
+              {/* Onboarding checklist */}
+              {showChecklist && <OnboardingChecklist onDismiss={dismissChecklist} />}
+
+              {/* Profile card */}
+              <div className="rounded-2xl bg-white border border-stone-100 p-4 sm:p-5">
+                <div className="flex items-center gap-3">
+                  <div className="h-9 w-9 sm:h-11 sm:w-11 rounded-xl bg-blue-50 border border-blue-100 text-blue-600 grid place-items-center text-xs sm:text-sm font-medium shrink-0">
+                    {avatar}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-stone-900 truncate">{displayName || "Guest"}</div>
+                    <div className="text-xs text-stone-400 truncate mt-0.5">{user?.email ?? "Not signed in"}</div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
+
+          {/* New meeting modal */}
+          {showNewMeetingModal && <NewMeetingModal onClose={() => setShowNewMeetingModal(false)} />}
         </div>
       </div>
     </div>

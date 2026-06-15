@@ -1,4 +1,7 @@
+"use client";
+
 import { ReactNode } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 
 export function MeetingLayout({
   header,
@@ -40,21 +43,34 @@ export function MeetingLayout({
         </div>
 
         {/* Side panel — overlay on mobile, fixed width on desktop */}
-        {sidebar ? (
-          <>
-            {/* Mobile/tablet backdrop */}
-            <div
-              className="md:hidden fixed inset-0 z-30 bg-black/50 backdrop-blur-sm"
-              onClick={onCloseSidebar}
-              aria-hidden="true"
-            />
-            {/* Panel */}
-            <div className="fixed inset-y-0 right-0 z-40 w-full xs:w-80 sm:w-[340px] md:relative md:inset-y-auto md:right-auto md:z-10 md:w-[340px] shrink-0 border-l border-white/[0.06] bg-[#0d0f14] flex flex-col shadow-2xl md:shadow-none">
-              {sidebar}
+        <AnimatePresence>
+          {sidebar && (
+            <div className="flex h-full shrink-0 relative z-40 md:z-10">
+              {/* Mobile/tablet backdrop */}
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="md:hidden fixed inset-0 z-30 bg-black/50 backdrop-blur-sm"
+                onClick={onCloseSidebar}
+                aria-hidden="true"
+              />
+              {/* Panel */}
+              <motion.div
+                initial={{ x: "100%", opacity: 0.9 }}
+                animate={{ x: 0, opacity: 1 }}
+                exit={{ x: "100%", opacity: 0.9 }}
+                transition={{ type: "spring", stiffness: 380, damping: 35 }}
+                className="fixed inset-y-0 right-0 z-40 w-full xs:w-80 sm:w-[340px] md:relative md:inset-y-auto md:right-auto md:w-[340px] shrink-0 border-l border-white/[0.06] bg-[#0d0f14] flex flex-col shadow-2xl md:shadow-none"
+              >
+                {sidebar}
+              </motion.div>
             </div>
-          </>
-        ) : null}
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );
 }
+

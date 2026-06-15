@@ -144,6 +144,42 @@ Write the minutes in this exact format:
       { role: "user", content: userPrompt },
     ] as const;
 
+    const createStreamHelper = (response: Response) => {
+      const encoder = new TextEncoder();
+      const decoder = new TextDecoder();
+      return new ReadableStream({
+        async start(controller) {
+          if (!response.body) { controller.close(); return; }
+          const reader = response.body.getReader();
+          let buffer = "";
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              buffer += decoder.decode(value, { stream: true });
+              const lines = buffer.split('\n');
+              buffer = lines.pop() ?? "";
+              for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed) continue;
+                if (trimmed === 'data: [DONE]') { controller.close(); return; }
+                if (trimmed.startsWith('data: ')) {
+                  try {
+                    const data = JSON.parse(trimmed.slice(6));
+                    const content = data.choices?.[0]?.delta?.content;
+                    if (content) controller.enqueue(encoder.encode(content));
+                  } catch (e) { /* partial or error JSON */ }
+                }
+              }
+            }
+            controller.close();
+          } catch (e) {
+            controller.error(e);
+          }
+        }
+      });
+    };
+
     const callGroq = async () => {
       const apiKey = process.env.GROQ_API_KEY;
       if (!apiKey) throw new Error("GROQ_API_KEY is not configured.");
@@ -155,18 +191,16 @@ Write the minutes in this exact format:
           messages,
           temperature: 0.2,
           max_tokens: 4000,
+          stream: true,
         }),
       });
-      const text = await response.text().catch(() => "");
       if (!response.ok) { 
+        const text = await response.text().catch(() => "");
         const err = new Error(text || `Groq API responded with status ${response.status}`); 
         (err as any).status = response.status; 
         throw err; 
       }
-      const data = JSON.parse(text) as { choices?: Array<{ message?: { content?: string } }> };
-      const minutes = data.choices?.[0]?.message?.content;
-      if (!minutes) throw new Error("Groq returned an empty response.");
-      return minutes;
+      return new Response(createStreamHelper(response), { headers: { "Content-Type": "text/plain; charset=utf-8" } });
     };
 
     const callOpenAI = async () => {
@@ -176,33 +210,29 @@ Write the minutes in this exact format:
       const response = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify({ model, messages, temperature: 0.2, max_tokens: 4000 }),
+        body: JSON.stringify({ model, messages, temperature: 0.2, max_tokens: 4000, stream: true }),
       });
-      const text = await response.text().catch(() => "");
       if (!response.ok) { 
+        const text = await response.text().catch(() => "");
         const err = new Error(text || `OpenAI API responded with status ${response.status}`); 
         (err as any).status = response.status; 
         throw err; 
       }
-      const data = JSON.parse(text) as { choices?: Array<{ message?: { content?: string } }> };
-      const minutes = data.choices?.[0]?.message?.content;
-      if (!minutes) throw new Error("OpenAI returned an empty response.");
-      return minutes;
+      return new Response(createStreamHelper(response), { headers: { "Content-Type": "text/plain; charset=utf-8" } });
     };
 
-    let minutes: string;
+    let streamResponse: Response;
     try {
-      minutes = await callGroq();
+      streamResponse = await callGroq();
     } catch (err) {
       const status = (err as any)?.status as number | undefined;
       const groqConfigured = Boolean((process.env.GROQ_API_KEY ?? "").trim());
-      // Fall back to OpenAI for any Groq error, not just rate limits
       if (!groqConfigured) throw err;
       console.warn(`Groq failed (${status}), falling back to OpenAI`);
-      minutes = await callOpenAI();
+      streamResponse = await callOpenAI();
     }
 
-    return NextResponse.json({ minutes });
+    return streamResponse;
   } catch (error) {
     console.error("AI Summary generation failed:", error);
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });

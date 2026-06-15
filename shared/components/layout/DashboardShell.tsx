@@ -53,10 +53,10 @@ function IcSettings() {
 }
 
 const NAV_ITEMS = [
-  { label: "Home",        href: "/meeting",           Icon: IcHome,        exact: true },
-  { label: "Meetings",    href: "/meeting/list",       Icon: IcMeetings,    exact: false },
+  { label: "Home", href: "/meeting", Icon: IcHome, exact: true },
+  { label: "Meetings", href: "/meeting/list", Icon: IcMeetings, exact: false },
   { label: "Transcripts", href: "/meeting/recordings", Icon: IcTranscripts, exact: false },
-  { label: "Summaries",   href: "/meeting/summaries",  Icon: IcSummaries,   exact: false },
+  { label: "Summaries", href: "/meeting/summaries", Icon: IcSummaries, exact: false },
 ];
 
 function NavLink({ item, onClose }: { item: typeof NAV_ITEMS[number]; onClose?: () => void }) {
@@ -137,7 +137,7 @@ function DashboardShellInner({ children }: DashboardShellProps) {
             <span className="block h-0.5 w-5 bg-slate-600 rounded" />
             <span className="block h-0.5 w-5 bg-slate-600 rounded" />
           </button>
-          <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-600 grid place-items-center text-white font-bold text-sm shrink-0">D</div>
+          <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-600 grid place-items-center text-white font-bold text-sm shrink-0">E</div>
           <span className="text-sm font-semibold text-slate-800 hidden sm:inline">Draftmin</span>
         </div>
 

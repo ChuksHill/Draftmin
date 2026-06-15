@@ -54,8 +54,8 @@ export function Header() {
 
   const navLinks = [
     { href: '/#features', label: 'Features' },
-    { href: '/#pricing',  label: 'Pricing'  },
-    { href: '/#about',    label: 'About'    },
+    { href: '/#pricing', label: 'Pricing' },
+    { href: '/#about', label: 'About' },
   ];
 
   return (
@@ -170,7 +170,7 @@ export function Header() {
         <div className="flex items-center justify-between px-5 h-16 border-b border-slate-100">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center">
-              <span className="font-bold text-white text-sm">D</span>
+              <span className="font-bold text-white text-sm"></span>
             </div>
             <span className="text-slate-900 font-bold">Draftmin</span>
           </div>

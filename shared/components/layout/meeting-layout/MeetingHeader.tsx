@@ -42,14 +42,14 @@ export function MeetingHeader({ title = "Meeting" }: { title?: string }) {
     ["excellent", "good"].includes(String(quality).toLowerCase())
       ? "text-emerald-400"
       : String(quality).toLowerCase() === "poor"
-      ? "text-amber-400"
-      : "text-white/40";
+        ? "text-amber-400"
+        : "text-white/40";
 
   return (
     <div className="flex w-full items-center justify-between gap-2 sm:gap-4">
       {/* Left */}
       <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-        <div className="h-7 w-7 sm:h-8 sm:w-8 rounded-xl bg-gradient-to-br from-blue-500 to-violet-600 grid place-items-center font-bold text-xs shrink-0">
+        <div className="h-7 w-7 sm:h-8 sm:w-8 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 grid place-items-center font-bold text-xs shrink-0">
           D
         </div>
         <div className="min-w-0">
