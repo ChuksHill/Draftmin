@@ -76,7 +76,7 @@ export function MeetingsList() {
   return (
     <div className="mx-auto max-w-3xl">
       <div className="mb-6">
-        <h1 className="text-xl font-bold text-slate-900">Meetings</h1>
+        <h1 className="text-xl font-bold text-slate-900 text-blue-600">Meetings</h1>
         <p className="text-sm text-slate-500 mt-0.5">All your past and upcoming meeting sessions.</p>
       </div>
 

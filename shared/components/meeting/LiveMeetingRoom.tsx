@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/shared/lib/supabase/client";
 import {
@@ -30,6 +31,20 @@ type ToastItem = {
 };
 
 type DMMessage = { from: string; text: string; timestamp: number };
+type AgendaItem = {
+  id: string;
+  title: string;
+  position: number;
+  is_completed: boolean;
+  decision_summary: string | null;
+  decided_by?: string[] | null;
+};
+type PersistedChatMessage = {
+  id: number;
+  created_at: string;
+  sender_identity: string;
+  message_text: string;
+};
 
 /* ─── STT env ────────────────────────────────────────────────────────────── */
 function parseSttOrder(v?: string | null): SttProvider[] {
@@ -50,6 +65,7 @@ export type LiveMeetingRoomProps = {
   roomName: string; identity: string; title?: string;
   startWithMic?: boolean; startWithCamera?: boolean;
   meetingType?: string;
+  initialAgenda?: string;
 };
 
 /* ─── Helpers ────────────────────────────────────────────────────────────── */
@@ -60,6 +76,12 @@ function identityToDisplay(identity: string) {
 function getInitials(name: string) {
   const p = name.trim().split(/\s+/).filter(Boolean);
   return !p.length ? "?" : (p[0][0] + (p.length > 1 ? p[p.length - 1][0] : "")).toUpperCase();
+}
+function parseAgendaText(source?: string | null) {
+  return (source ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^[-*\d.)\s]+/, "").trim())
+    .filter(Boolean);
 }
 
 /* ─── Toast system ───────────────────────────────────────────────────────── */
@@ -346,11 +368,48 @@ function ChatView({
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [persistedMessages, setPersistedMessages] = useState<PersistedChatMessage[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [tab, setTab] = useState<"everyone" | "dm">(dmTarget ? "dm" : "everyone");
 
   useEffect(() => { if (dmTarget) setTab("dm"); }, [dmTarget]);
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMessages, dmMessages, tab]);
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMessages, persistedMessages, dmMessages, tab]);
+
+  useEffect(() => {
+    if (!meetingId) {
+      setPersistedMessages([]);
+      return;
+    }
+
+    async function loadChatHistory() {
+      const { data, error } = await supabase
+        .from("chat_history")
+        .select("id, created_at, sender_identity, message_text")
+        .eq("meeting_id", meetingId)
+        .order("created_at", { ascending: true })
+        .limit(200);
+      if (error) {
+        setUploadError(`Could not load chat history: ${error.message}`);
+        return;
+      }
+      setPersistedMessages((data ?? []) as PersistedChatMessage[]);
+    }
+
+    void loadChatHistory();
+    const channel = supabase
+      .channel(`meeting-chat-${meetingId}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "chat_history", filter: `meeting_id=eq.${meetingId}` },
+        (payload) => {
+          const next = payload.new as PersistedChatMessage;
+          setPersistedMessages((prev) => prev.some((msg) => msg.id === next.id) ? prev : [...prev, next]);
+        }
+      )
+      .subscribe();
+
+    return () => { void supabase.removeChannel(channel); };
+  }, [meetingId]);
 
   const dmList = dmTarget ? (dmMessages[dmTarget] ?? []) : [];
 
@@ -440,6 +499,16 @@ function ChatView({
     );
   };
 
+  const liveOnlyMessages = chatMessages.filter((msg: any) => {
+    const text = msg.message ?? msg.text ?? "";
+    const from = msg.from?.identity ?? msg.from ?? identity;
+    return !persistedMessages.some((saved) => saved.sender_identity === from && saved.message_text === text);
+  });
+  const everyoneMessages = [
+    ...persistedMessages.map((msg) => ({ id: msg.id, from: msg.sender_identity, message: msg.message_text })),
+    ...liveOnlyMessages,
+  ];
+
   return (
     <div className="h-full flex flex-col bg-white">
       <div className="flex border-b border-stone-200 shrink-0">
@@ -457,7 +526,7 @@ function ChatView({
 
       <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-0 flex flex-col justify-start">
         {tab === "everyone" ? (
-          chatMessages.length === 0 ? (
+          everyoneMessages.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 px-4 text-center my-auto">
               <div className="h-12 w-12 rounded-2xl bg-stone-100 border border-stone-200 flex items-center justify-center mb-4 text-stone-400 shadow-inner">
                 <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -468,7 +537,7 @@ function ChatView({
               <p className="text-xs text-stone-400 mt-1 max-w-[200px] leading-relaxed">Be the first to say hello or send a file to the team!</p>
             </div>
           ) : (
-            chatMessages.map((m, i) => renderMessage(m, i))
+            everyoneMessages.map((m, i) => renderMessage(m, (m as any).id ?? `live-${i}`))
           )
         ) : (
           dmList.length === 0 ? (
@@ -506,7 +575,7 @@ function ChatView({
                 ? <div className="h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
                 : <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4 text-stone-500" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" /></svg>
               }
-              <input type="file" onChange={(e) => { const f = e.target.files?.[0]; if (!f) return; if (f.size > 52428800) { setUploadError("File exceeds 50 MB."); return; } setUploadError(null); setSelectedFile(f); e.target.value = ""; }} className="hidden" accept="image/*,application/pdf,.doc,.docx,.txt" disabled={isUploading} />
+              <input type="file" onChange={(e) => { const f = e.target.files?.[0]; if (!f) return; if (f.size > 52428800) { setUploadError("File exceeds 50 MB."); return; } setUploadError(null); setSelectedFile(f); e.target.value = ""; }} className="hidden" accept="image/*,application/pdf,text/plain,.doc,.docx,.txt" disabled={isUploading} />
             </label>
           )}
           <input
@@ -530,6 +599,45 @@ function ChatView({
 }
 
 /* ─── Participants panel ─────────────────────────────────────────────────── */
+function ChatToastListener({
+  activePanel,
+  onToast,
+}: {
+  activePanel: MeetingPanel;
+  onToast: (t: Omit<ToastItem, "id">) => void;
+}) {
+  const { localParticipant } = useLocalParticipant();
+  const { chatMessages } = useChat();
+  const seenRef = useRef(0);
+
+  useEffect(() => {
+    if (chatMessages.length <= seenRef.current) {
+      seenRef.current = chatMessages.length;
+      return;
+    }
+
+    const nextMessages = chatMessages.slice(seenRef.current);
+    seenRef.current = chatMessages.length;
+    if (activePanel === "chat") return;
+
+    nextMessages.forEach((msg: any) => {
+      const fromIdentity = msg.from?.identity ?? msg.from;
+      if (!fromIdentity || fromIdentity === localParticipant?.identity) return;
+      const raw = msg.message ?? msg.text ?? "";
+      let body = raw;
+      try {
+        if (raw.startsWith("{")) {
+          const parsed = JSON.parse(raw);
+          body = parsed.text || parsed.attachment?.name || "Shared a document";
+        }
+      } catch { /* ignore */ }
+      onToast({ type: "chat", title: `Chat from ${identityToDisplay(fromIdentity)}`, body: body.slice(0, 80) });
+    });
+  }, [activePanel, chatMessages, localParticipant?.identity, onToast]);
+
+  return null;
+}
+
 function ParticipantsPanel({ onDM }: { onDM: (identity: string) => void }) {
   const participants = useParticipants();
   return (
@@ -629,18 +737,135 @@ function CaptionsPanel({
 }
 
 /* ─── Side panel ─────────────────────────────────────────────────────────── */
+function AgendaPanel({
+  agendaItems,
+  captions,
+  isHost,
+  summaryStatus,
+  onUpdateAgendaItem,
+}: {
+  agendaItems: AgendaItem[];
+  captions: string[];
+  isHost: boolean;
+  summaryStatus: Record<string, "generating" | "error">;
+  onUpdateAgendaItem: (id: string, patch: Partial<Pick<AgendaItem, "is_completed" | "decision_summary">>) => void;
+}) {
+  const latestTranscript = captions.slice(-10).join(" ");
+  const suggestedSummary = (title: string) => {
+    const words = title.toLowerCase().split(/\s+/).filter((word) => word.length > 3);
+    const hits = captions
+      .filter((line) => words.some((word) => line.toLowerCase().includes(word)))
+      .slice(-3);
+    if (!hits.length) return "";
+    return hits
+      .map((line) => {
+        const text = line.includes(":") ? line.split(":").slice(1).join(":").trim() : line;
+        return text.replace(/\s+/g, " ").slice(0, 140);
+      })
+      .join(" ");
+  };
+
+  return (
+    <div className="flex-1 overflow-y-auto p-3 space-y-3 bg-white">
+      <div className="rounded-xl border border-blue-100 bg-blue-50 p-3">
+        <p className="text-xs font-semibold text-blue-700">Agenda progress</p>
+        <p className="mt-1 text-xs text-blue-600 leading-relaxed">
+          The host can complete each item to attach an AI summary of what participants discussed.
+        </p>
+      </div>
+      {agendaItems.length ? (
+        agendaItems.map((item, index) => {
+          const suggestion = suggestedSummary(item.title);
+          return (
+            <div key={item.id} className="rounded-2xl border border-stone-100 bg-stone-50 p-3 space-y-3">
+              <div className="flex items-start gap-3">
+                <button
+                  type="button"
+                  onClick={() => onUpdateAgendaItem(item.id, { is_completed: !item.is_completed })}
+                  disabled={!isHost}
+                  className={`mt-0.5 h-6 w-6 rounded-full border-2 grid place-items-center shrink-0 transition ${
+                    item.is_completed ? "border-emerald-500 bg-emerald-500 text-white" : "border-stone-300 bg-white text-transparent hover:border-blue-300"
+                  } ${isHost ? "" : "cursor-not-allowed opacity-60"}`}
+                  aria-label={item.is_completed ? "Mark agenda item untreated" : "Mark agenda item treated"}
+                  title={isHost ? undefined : "Only the host can complete agenda items"}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" className="h-3.5 w-3.5" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                </button>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] font-semibold text-stone-400 uppercase tracking-wide">Item {index + 1}</p>
+                  <p className={`mt-0.5 text-sm font-medium leading-snug ${item.is_completed ? "text-stone-500" : "text-stone-800"}`}>
+                    {item.title}
+                  </p>
+                </div>
+              </div>
+              {summaryStatus[item.id] === "generating" ? (
+                <div className="rounded-xl border border-blue-100 bg-white px-3 py-2 text-xs text-blue-600">
+                  Drafting AI discussion summary...
+                </div>
+              ) : item.is_completed ? (
+                <div className="rounded-xl border border-emerald-100 bg-white px-3 py-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-600">Participant summary</p>
+                  <p className="mt-1 text-xs leading-relaxed text-stone-600">
+                    {(item.decision_summary ?? "").trim() || "No participant discussion was captured for this agenda item."}
+                  </p>
+                  {summaryStatus[item.id] === "error" && (
+                    <p className="mt-2 text-[11px] text-red-500">AI summary failed. The host can edit the note manually.</p>
+                  )}
+                </div>
+              ) : (
+                <textarea
+                  value={item.decision_summary ?? ""}
+                  onChange={(e) => onUpdateAgendaItem(item.id, { decision_summary: e.target.value })}
+                  placeholder={suggestion || "AI summary will appear here when the host completes this agenda item."}
+                  rows={3}
+                  className="w-full resize-none rounded-xl border border-stone-200 bg-white px-3 py-2 text-xs text-stone-700 placeholder:text-stone-300 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                />
+              )}
+
+            </div>
+          );
+        })
+      ) : (
+        <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
+          <div className="h-12 w-12 rounded-2xl bg-stone-100 border border-stone-200 grid place-items-center text-stone-400 mb-4">
+            <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 6h11M9 12h11M9 18h11" />
+              <path d="M4 6h.01M4 12h.01M4 18h.01" />
+            </svg>
+          </div>
+          <h3 className="text-sm font-semibold text-stone-700">No agenda shared</h3>
+          <p className="text-xs text-stone-400 mt-1 max-w-[220px] leading-relaxed">Create the meeting with agenda items so progress can be tracked here.</p>
+        </div>
+      )}
+      {latestTranscript && (
+        <div className="rounded-xl border border-stone-100 bg-white p-3">
+          <p className="text-[11px] font-semibold text-stone-400 uppercase tracking-wide">Latest discussion</p>
+          <p className="mt-1 text-xs text-stone-500 leading-relaxed">{latestTranscript.slice(0, 420)}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SidePanel({
   activePanel, onClose, captions, interimCaption, captionError,
   speechRecognitionAvailable, providerOrder, meetingId,
   dmTarget, dmMessages, onSendDM, onDMParticipant,
+  agendaItems, isHost, summaryStatus, onUpdateAgendaItem,
 }: {
   activePanel: Exclude<MeetingPanel, null>; onClose: () => void;
   captions: string[]; interimCaption: string; captionError: string | null;
   speechRecognitionAvailable: boolean; providerOrder: SttProvider[]; meetingId: string | null;
   dmTarget: string | null; dmMessages: Record<string, DMMessage[]>;
   onSendDM: (to: string, text: string) => void; onDMParticipant: (identity: string) => void;
+  agendaItems: AgendaItem[];
+  isHost: boolean;
+  summaryStatus: Record<string, "generating" | "error">;
+  onUpdateAgendaItem: (id: string, patch: Partial<Pick<AgendaItem, "is_completed" | "decision_summary">>) => void;
 }) {
-  const panelTitle = activePanel === "participants" ? "People" : activePanel === "chat" ? "Chat" : "Live Captions";
+  const panelTitle = activePanel === "participants" ? "People" : activePanel === "chat" ? "Chat" : activePanel === "agenda" ? "Agenda" : "Live Captions";
 
   return (
     <div className="h-full flex flex-col bg-white border-l border-stone-200">
@@ -674,6 +899,18 @@ function SidePanel({
               className="absolute inset-0 flex flex-col"
             >
               <ChatView dmTarget={dmTarget} dmMessages={dmMessages} onSendDM={onSendDM} meetingId={meetingId} onClose={onClose} />
+            </motion.div>
+          )}
+          {activePanel === "agenda" && (
+            <motion.div
+              key="agenda"
+              initial={{ opacity: 0, x: 15 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -15 }}
+              transition={{ duration: 0.15 }}
+              className="absolute inset-0 flex flex-col"
+            >
+              <AgendaPanel agendaItems={agendaItems} captions={captions} isHost={isHost} summaryStatus={summaryStatus} onUpdateAgendaItem={onUpdateAgendaItem} />
             </motion.div>
           )}
           {activePanel === "captions" && (
@@ -1154,7 +1391,15 @@ function MeetingSummaryDashboard({ captions, roomName, onClose, meetingId, isHos
           }
         })
       });
-      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error((d as any).error || `${res.status}`); }
+      if (!res.ok) {
+        const errorText = await res.text().catch(() => "");
+        let message = errorText || `${res.status}`;
+        try {
+          const parsed = JSON.parse(errorText) as { error?: string };
+          message = parsed.error || message;
+        } catch { /* response was not JSON */ }
+        throw new Error(message);
+      }
 
       const reader = res.body?.getReader();
       if (!reader) throw new Error("No response stream");
@@ -1186,7 +1431,7 @@ function MeetingSummaryDashboard({ captions, roomName, onClose, meetingId, isHos
       <div className="mx-auto w-full max-w-[1280px] px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         <header className="border-b border-stone-200 pb-4 mb-6 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 grid place-items-center font-bold text-white shadow-sm shrink-0">E</div>
+            <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 grid place-items-center font-bold text-white shadow-sm shrink-0">D</div>
             <div>
               <h1 className="text-sm font-bold text-stone-800">Meeting ended</h1>
               <p className="text-xs text-stone-400 font-mono mt-0.5 truncate max-w-[200px]">{roomName}</p>
@@ -1312,7 +1557,7 @@ function MeetingSummaryDashboard({ captions, roomName, onClose, meetingId, isHos
 }
 
 /* ─── Supabase meeting helper ────────────────────────────────────────────── */
-async function ensureMeeting(roomName: string, hostIdentity: string): Promise<string | null> {
+async function ensureMeeting(roomName: string, hostIdentity: string, title?: string, meetingType?: string, initialAgenda?: string): Promise<string | null> {
   try {
     const { data: { user }, error: userErr } = await supabase.auth.getUser();
     if (userErr) console.warn("ensureMeeting getUser error:", userErr);
@@ -1320,15 +1565,19 @@ async function ensureMeeting(roomName: string, hostIdentity: string): Promise<st
 
     const { data: existing } = await supabase
       .from("meetings")
-      .select("id, host_identity")
+      .select("id, host_id, settings")
       .eq("room_name", roomName)
       .maybeSingle();
 
     if (existing?.id) {
-      // Update host if needed
-      if (!existing.host_identity || existing.host_identity !== hostIdentity) {
-        await supabase.from("meetings").update({ host_identity: hostIdentity }).eq("id", existing.id);
-      }
+      const currentSettings = (existing.settings ?? {}) as Record<string, unknown>;
+      await supabase.from("meetings").update({
+        is_active: true,
+        host_id: existing.host_id ?? hostId,
+        title: title?.trim() || roomName,
+        ...(initialAgenda?.trim() ? { agenda: initialAgenda.trim() } : {}),
+        settings: { ...currentSettings, meeting_type: meetingType || currentSettings.meeting_type || "general", host_identity: hostIdentity },
+      }).eq("id", existing.id);
       return existing.id;
     }
 
@@ -1336,10 +1585,11 @@ async function ensureMeeting(roomName: string, hostIdentity: string): Promise<st
       .from("meetings")
       .insert({
         room_name: roomName,
-        title: roomName,
+        title: title?.trim() || roomName,
+        agenda: initialAgenda?.trim() || "",
         host_id: hostId,
-        host_identity: hostIdentity,
-        status: "active"
+        is_active: true,
+        settings: { meeting_type: meetingType || "general", host_identity: hostIdentity, mute_on_entry: false, screen_share_disabled: false },
       })
       .select("id")
       .single();
@@ -1390,7 +1640,7 @@ function formatLiveKitConnectionError(error: Error) {
   return message;
 }
 
-export function LiveMeetingRoom({ roomName, identity, title = "Meeting", startWithMic = true, startWithCamera = false }: LiveMeetingRoomProps) {
+export function LiveMeetingRoom({ roomName, identity, title = "Meeting", startWithMic = true, startWithCamera = false, meetingType = "general", initialAgenda }: LiveMeetingRoomProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasJoinedRoomRef = useRef(false);
@@ -1415,6 +1665,9 @@ export function LiveMeetingRoom({ roomName, identity, title = "Meeting", startWi
   const [dmTarget, setDmTarget] = useState<string | null>(null);
   const [meetingEndedByHost, setMeetingEndedByHost] = useState(false);
   const [resolvedIsHost, setResolvedIsHost] = useState<boolean | null>(null);
+  const [agendaItems, setAgendaItems] = useState<AgendaItem[]>([]);
+  const [agendaSummaryStatus, setAgendaSummaryStatus] = useState<Record<string, "generating" | "error">>({});
+  const seededAgendaRef = useRef(false);
 
   /* Host determination */
   useEffect(() => {
@@ -1527,13 +1780,157 @@ export function LiveMeetingRoom({ roomName, identity, title = "Meeting", startWi
 
   /* Meeting sync */
   useEffect(() => {
-    void ensureMeeting(roomName, identity).then((mId) => {
+    void ensureMeeting(roomName, identity, title, meetingType, initialAgenda).then((mId) => {
       setMeetingId(mId);
       if (mId && hasJoinedRoomRef.current) {
         void recordParticipantJoin(mId, resolvedIsHost ?? false);
       }
     });
-  }, [roomName, identity, resolvedIsHost, recordParticipantJoin]);
+  }, [roomName, identity, title, meetingType, initialAgenda, resolvedIsHost, recordParticipantJoin]);
+
+  useEffect(() => {
+    if (!meetingId) return;
+
+    async function loadAgenda() {
+      const { data, error } = await supabase
+        .from("meeting_agenda_items")
+        .select("id, title, position, is_completed, decision_summary, decided_by")
+        .eq("meeting_id", meetingId)
+        .order("position", { ascending: true });
+
+      if (error) {
+        console.warn("Agenda load error:", error);
+      }
+
+      if (data?.length) {
+        setAgendaItems(data as AgendaItem[]);
+        return;
+      }
+
+      const { data: meeting, error: meetingError } = await supabase
+        .from("meetings")
+        .select("agenda")
+        .eq("id", meetingId)
+        .maybeSingle();
+
+      if (meetingError) console.warn("Meeting agenda fallback error:", meetingError);
+
+      const fallbackTitles = parseAgendaText(initialAgenda).length
+        ? parseAgendaText(initialAgenda)
+        : parseAgendaText(meeting?.agenda);
+
+      if (!fallbackTitles.length) {
+        setAgendaItems([]);
+        return;
+      }
+
+      const fallbackItems = fallbackTitles.map((item, index) => ({
+        id: `local-${meetingId}-${index}`,
+        title: item,
+        position: index + 1,
+        is_completed: false,
+        decision_summary: "",
+        decided_by: [],
+      }));
+      setAgendaItems(fallbackItems);
+
+      if (seededAgendaRef.current) return;
+      seededAgendaRef.current = true;
+
+      const { data: inserted, error: insertError } = await supabase
+        .from("meeting_agenda_items")
+        .insert(fallbackTitles.map((item, index) => ({
+          meeting_id: meetingId,
+          title: item,
+          position: index + 1,
+        })))
+        .select("id, title, position, is_completed, decision_summary, decided_by")
+        .order("position", { ascending: true });
+
+      if (insertError) {
+        console.warn("Agenda fallback seed error:", insertError);
+        return;
+      }
+      if (inserted?.length) setAgendaItems(inserted as AgendaItem[]);
+    }
+
+    void loadAgenda();
+    const channel = supabase
+      .channel(`meeting-agenda-${meetingId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "meeting_agenda_items", filter: `meeting_id=eq.${meetingId}` },
+        () => void loadAgenda()
+      )
+      .subscribe();
+
+    return () => { void supabase.removeChannel(channel); };
+  }, [meetingId, initialAgenda]);
+
+  const updateAgendaItem = useCallback((id: string, patch: Partial<Pick<AgendaItem, "is_completed" | "decision_summary">>) => {
+    const togglesCompletion = Object.prototype.hasOwnProperty.call(patch, "is_completed");
+    if (togglesCompletion && !(resolvedIsHost ?? false)) return;
+
+    const currentItem = agendaItems.find((item) => item.id === id);
+    setAgendaItems((items) => items.map((item) => item.id === id ? { ...item, ...patch } : item));
+
+    if (!id.startsWith("local-")) {
+      void supabase.from("meeting_agenda_items").update(patch).eq("id", id);
+    }
+
+    if (!togglesCompletion || !patch.is_completed || !currentItem) return;
+    if ((patch.decision_summary ?? currentItem.decision_summary ?? "").trim()) return;
+
+    setAgendaSummaryStatus((prev) => ({ ...prev, [id]: "generating" }));
+
+    void (async () => {
+      try {
+        let transcriptLines = captions;
+        if (meetingId) {
+          const { data: dbTranscripts, error } = await supabase
+            .from("transcripts")
+            .select("speaker_name, transcript_text")
+            .eq("meeting_id", meetingId)
+            .order("created_at", { ascending: true });
+
+          if (error) console.warn("Agenda summary transcript load error:", error);
+          if (dbTranscripts?.length) {
+            transcriptLines = dbTranscripts.map((line) => `${line.speaker_name}: ${line.transcript_text}`);
+          }
+        }
+
+        const response = await fetch("/api/agenda-summary", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            agendaTitle: currentItem.title,
+            transcript: transcriptLines,
+            meetingContext: { meetingType },
+          }),
+        });
+
+        if (!response.ok) {
+          const text = await response.text().catch(() => "");
+          throw new Error(text || `Agenda summary failed with status ${response.status}`);
+        }
+
+        const { summary } = (await response.json()) as { summary?: string };
+        const decision_summary = summary?.trim() || "No relevant participant discussion was captured.";
+        setAgendaItems((items) => items.map((item) => item.id === id ? { ...item, decision_summary } : item));
+        if (!id.startsWith("local-")) {
+          await supabase.from("meeting_agenda_items").update({ decision_summary }).eq("id", id);
+        }
+        setAgendaSummaryStatus((prev) => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+      } catch (error) {
+        console.warn("Agenda summary generation failed:", error);
+        setAgendaSummaryStatus((prev) => ({ ...prev, [id]: "error" }));
+      }
+    })();
+  }, [agendaItems, captions, meetingId, meetingType, resolvedIsHost]);
 
   /* DM sender */
   const [dmLocalParticipant, setDmLocalParticipant] = useState<any>(null);
@@ -1557,7 +1954,6 @@ export function LiveMeetingRoom({ roomName, identity, title = "Meeting", startWi
       await supabase
         .from("meetings")
         .update({
-          status: "ended",
           is_active: false,
           ended_at: new Date().toISOString()
         })
@@ -1643,6 +2039,7 @@ export function LiveMeetingRoom({ roomName, identity, title = "Meeting", startWi
       roomName={roomName}
       meetingId={meetingId}
       isHost={resolvedIsHost ?? false}
+      initialMeetingType={meetingType}
       onClose={() => { window.location.href = "/meeting"; }}
     />
   );
@@ -1689,6 +2086,7 @@ export function LiveMeetingRoom({ roomName, identity, title = "Meeting", startWi
           <LocalParticipantCapture onReady={setDmLocalParticipant} />
 
           <NotificationSystem onToast={addToast} onDMReceived={handleDMReceived} localIdentity={identity} isHost={resolvedIsHost ?? false} />
+          <ChatToastListener activePanel={activePanel} onToast={addToast} />
           <RoomTranscriptionController
             sttDisabled={STT_DISABLED} sttLang={DEFAULT_STT_LANG} sttChunkMs={DEFAULT_STT_CHUNK_MS}
             speechRecognitionAvailable={speechRecognitionAvailable} sttProviderOrder={DEFAULT_STT_ORDER}
@@ -1709,6 +2107,10 @@ export function LiveMeetingRoom({ roomName, identity, title = "Meeting", startWi
                 meetingId={meetingId} dmTarget={dmTarget} dmMessages={dmMessages}
                 onSendDM={sendDM}
                 onDMParticipant={(id) => { setDmTarget(id); setActivePanel("chat"); }}
+                agendaItems={agendaItems}
+                isHost={resolvedIsHost ?? false}
+                summaryStatus={agendaSummaryStatus}
+                onUpdateAgendaItem={updateAgendaItem}
               />
             ) : undefined}
             controls={
@@ -1770,8 +2172,6 @@ export function LiveMeetingRoom({ roomName, identity, title = "Meeting", startWi
     </ErrorBoundary>
   );
 }
-
-import React from "react";
 
 /* Helper: capture localParticipant ref outside LiveKitRoom context */
 function LocalParticipantCapture({ onReady }: { onReady: (p: any) => void }) {

@@ -14,7 +14,8 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
   full_name TEXT NOT NULL DEFAULT 'Anonymous',
   avatar_url TEXT DEFAULT '',
-  email TEXT NOT NULL UNIQUE
+  email TEXT NOT NULL UNIQUE,
+  default_organisation_id UUID
 );
 
 -- Enable Row-Level Security
@@ -28,6 +29,82 @@ CREATE POLICY "Public profiles are viewable by everyone" ON public.profiles
 DROP POLICY IF EXISTS "Users can update their own profile" ON public.profiles;
 CREATE POLICY "Users can update their own profile" ON public.profiles 
   FOR UPDATE USING (auth.uid() = id);
+
+-- =========================================================================
+-- 2B. ORGANISATIONS
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS public.organisations (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+  owner_id UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+  name TEXT NOT NULL,
+  slug TEXT UNIQUE NOT NULL,
+  description TEXT DEFAULT ''
+);
+
+ALTER TABLE public.organisations ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Members can view organisations" ON public.organisations;
+CREATE POLICY "Members can view organisations" ON public.organisations
+  FOR SELECT USING (owner_id = auth.uid());
+
+DROP POLICY IF EXISTS "Authenticated users can create organisations" ON public.organisations;
+CREATE POLICY "Authenticated users can create organisations" ON public.organisations
+  FOR INSERT WITH CHECK (auth.uid() = owner_id);
+
+DROP POLICY IF EXISTS "Owners can update organisations" ON public.organisations;
+CREATE POLICY "Owners can update organisations" ON public.organisations
+  FOR UPDATE USING (auth.uid() = owner_id);
+
+CREATE TABLE IF NOT EXISTS public.organisation_members (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+  organisation_id UUID REFERENCES public.organisations(id) ON DELETE CASCADE NOT NULL,
+  user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
+  role TEXT DEFAULT 'member' NOT NULL,
+  UNIQUE (organisation_id, user_id)
+);
+
+ALTER TABLE public.organisation_members ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Members can view organisations" ON public.organisations;
+CREATE POLICY "Members can view organisations" ON public.organisations
+  FOR SELECT USING (
+    owner_id = auth.uid()
+    OR EXISTS (
+      SELECT 1 FROM public.organisation_members om
+      WHERE om.organisation_id = organisations.id
+      AND om.user_id = auth.uid()
+    )
+  );
+
+DROP POLICY IF EXISTS "Members can view organisation memberships" ON public.organisation_members;
+CREATE POLICY "Members can view organisation memberships" ON public.organisation_members
+  FOR SELECT USING (
+    user_id = auth.uid()
+    OR EXISTS (
+      SELECT 1 FROM public.organisations o
+      WHERE o.id = organisation_members.organisation_id
+      AND o.owner_id = auth.uid()
+    )
+  );
+
+DROP POLICY IF EXISTS "Owners can manage organisation memberships" ON public.organisation_members;
+CREATE POLICY "Owners can manage organisation memberships" ON public.organisation_members
+  FOR ALL USING (
+    EXISTS (
+      SELECT 1 FROM public.organisations o
+      WHERE o.id = organisation_members.organisation_id
+      AND o.owner_id = auth.uid()
+    )
+  )
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.organisations o
+      WHERE o.id = organisation_members.organisation_id
+      AND o.owner_id = auth.uid()
+    )
+  );
 
 -- =========================================================================
 -- 3. PROFILE AUTO-SYNC TRIGGER (Supabase Auth -> Public Profiles)
@@ -59,9 +136,12 @@ CREATE TABLE IF NOT EXISTS public.meetings (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
   host_id UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+  organisation_id UUID REFERENCES public.organisations(id) ON DELETE SET NULL,
   room_name TEXT UNIQUE NOT NULL,
   title TEXT NOT NULL,
   is_active BOOLEAN DEFAULT false NOT NULL,
+  ended_at TIMESTAMP WITH TIME ZONE,
+  agenda TEXT DEFAULT '',
   passcode TEXT, -- Optional password lock
   settings JSONB DEFAULT '{"mute_on_entry": false, "screen_share_disabled": false}'::jsonb NOT NULL
 );
@@ -131,6 +211,40 @@ CREATE POLICY "Write meeting summaries" ON public.meeting_summaries
 CREATE INDEX IF NOT EXISTS idx_summaries_meeting ON public.meeting_summaries(meeting_id);
 
 -- =========================================================================
+-- 6B. MEETING AGENDAS
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS public.meeting_agenda_items (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+  meeting_id UUID REFERENCES public.meetings(id) ON DELETE CASCADE NOT NULL,
+  position INTEGER DEFAULT 0 NOT NULL,
+  title TEXT NOT NULL,
+  is_completed BOOLEAN DEFAULT false NOT NULL,
+  decision_summary TEXT DEFAULT '',
+  decided_by TEXT[] DEFAULT ARRAY[]::TEXT[]
+);
+
+ALTER TABLE public.meeting_agenda_items ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "View meeting agenda items" ON public.meeting_agenda_items;
+CREATE POLICY "View meeting agenda items" ON public.meeting_agenda_items
+  FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Create meeting agenda items" ON public.meeting_agenda_items;
+CREATE POLICY "Create meeting agenda items" ON public.meeting_agenda_items
+  FOR INSERT WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Update meeting agenda items" ON public.meeting_agenda_items;
+CREATE POLICY "Update meeting agenda items" ON public.meeting_agenda_items
+  FOR UPDATE USING (true);
+
+DROP POLICY IF EXISTS "Delete meeting agenda items" ON public.meeting_agenda_items;
+CREATE POLICY "Delete meeting agenda items" ON public.meeting_agenda_items
+  FOR DELETE USING (true);
+
+CREATE INDEX IF NOT EXISTS idx_agenda_items_meeting ON public.meeting_agenda_items(meeting_id, position);
+
+-- =========================================================================
 -- 7. ACTION ITEMS CHECKLIST
 -- =========================================================================
 CREATE TABLE IF NOT EXISTS public.action_items (
@@ -189,7 +303,16 @@ VALUES (
   'chat_attachments',
   true,
   52428800, -- 50MB file size limit
-  ARRAY['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'application/pdf']
+  ARRAY[
+    'image/png',
+    'image/jpeg',
+    'image/gif',
+    'image/webp',
+    'application/pdf',
+    'text/plain',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  ]
 )
 ON CONFLICT (id) DO NOTHING;
 

@@ -1,0 +1,8 @@
+⨯ Another next dev server is already running.
+
+- Local:        http://localhost:3000
+- PID:          5348
+- Dir:          C:\Users\ucchi\OneDrive\Desktop\draftmin v2\Draftmin
+- Log:          .next\dev\logs\next-development.log
+
+Run taskkill /PID 5348 /F to stop it.

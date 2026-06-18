@@ -3,7 +3,7 @@
 import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { StartAudio, useLocalParticipant, useRoomContext } from "@livekit/components-react";
 
-export type MeetingPanel = "participants" | "chat" | "captions" | null;
+export type MeetingPanel = "participants" | "chat" | "captions" | "agenda" | null;
 
 type Props = {
   activePanel?: MeetingPanel;
@@ -63,6 +63,12 @@ const IC = {
     <svg viewBox="0 0 24 24" fill="none" className="h-[18px] w-[18px]" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
       <rect x="2" y="5" width="20" height="14" rx="2" />
       <path d="M7 12h4M13 12h4M7 15.5h3M12 15.5h5" />
+    </svg>
+  ),
+  Agenda: () => (
+    <svg viewBox="0 0 24 24" fill="none" className="h-[18px] w-[18px]" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 6h11M9 12h11M9 18h11" />
+      <path d="M4 6h.01M4 12h.01M4 18h.01" />
     </svg>
   ),
   Speaker: () => (
@@ -218,6 +224,7 @@ export function MeetingControls({
       )}
       <Btn label="People" active={activePanel === "participants"} onClick={() => { onTogglePanel?.("participants"); setShowMore(false); }} icon={<IC.People />} />
       <Btn label="Chat" active={activePanel === "chat"} onClick={() => { onTogglePanel?.("chat"); setShowMore(false); }} icon={<IC.Chat />} />
+      <Btn label="Agenda" active={activePanel === "agenda"} onClick={() => { onTogglePanel?.("agenda"); setShowMore(false); }} icon={<IC.Agenda />} />
       <Btn label="Captions" active={activePanel === "captions"} onClick={() => { onTogglePanel?.("captions"); setShowMore(false); }} icon={<IC.Captions />} />
       <Btn label={viewMode === "grid" ? "Speaker" : "Grid"} onClick={() => { onToggleView?.(); setShowMore(false); }} icon={viewMode === "grid" ? <IC.Speaker /> : <IC.Grid />} />
       <Btn label={isFullscreen ? "Exit full" : "Fullscreen"} onClick={() => { onToggleFullscreen?.(); setShowMore(false); }} icon={isFullscreen ? <IC.ExitFullscreen /> : <IC.Fullscreen />} />
@@ -248,7 +255,7 @@ export function MeetingControls({
       </div>
 
       {/* ── Mobile compact bar ────────────────────────────────────────── */}
-      <div className="flex sm:hidden items-end gap-3 bg-[#14151c]/90 backdrop-blur-2xl border border-white/[0.08] rounded-2xl px-4 py-3 shadow-[0_8px_40px_rgba(0,0,0,0.6)]">
+      <div className="flex sm:hidden items-end justify-center gap-2 bg-[#14151c]/90 backdrop-blur-2xl border border-white/[0.08] rounded-2xl px-3 py-2.5 shadow-[0_8px_40px_rgba(0,0,0,0.6)] max-w-full">
         <Btn label={isMicrophoneEnabled ? "Mute" : "Unmute"} danger={!isMicrophoneEnabled}
           onClick={toggleMic} disabled={togglingMic} icon={isMicrophoneEnabled ? <IC.MicOn /> : <IC.MicOff />} />
         <Btn label={isCameraEnabled ? "Stop" : "Start"} danger={!isCameraEnabled}
@@ -257,14 +264,15 @@ export function MeetingControls({
         <div className="relative" ref={moreRef}>
           <Btn label="More" active={showMore} onClick={() => setShowMore((v) => !v)} icon={<IC.More />} />
           {showMore && (
-            <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-50 bg-[#1a1d27]/95 backdrop-blur-2xl border border-white/10 rounded-2xl p-3 shadow-2xl">
-              <div className="grid grid-cols-3 gap-2 w-52">
+            <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-50 bg-[#1a1d27]/95 backdrop-blur-2xl border border-white/10 rounded-2xl p-3 shadow-2xl max-w-[calc(100vw-1.5rem)]">
+              <div className="grid grid-cols-3 gap-2 w-56 max-w-full">
                 {canScreenShare && (
                   <Btn label={isScreenShareEnabled ? "Stop share" : "Share"} active={isScreenShareEnabled}
                     onClick={toggleScreen} disabled={togglingScreen} icon={<IC.Share />} />
                 )}
                 <Btn label="People" active={activePanel === "participants"} onClick={() => { onTogglePanel?.("participants"); setShowMore(false); }} icon={<IC.People />} />
                 <Btn label="Chat" active={activePanel === "chat"} onClick={() => { onTogglePanel?.("chat"); setShowMore(false); }} icon={<IC.Chat />} />
+                <Btn label="Agenda" active={activePanel === "agenda"} onClick={() => { onTogglePanel?.("agenda"); setShowMore(false); }} icon={<IC.Agenda />} />
                 <Btn label="Captions" active={activePanel === "captions"} onClick={() => { onTogglePanel?.("captions"); setShowMore(false); }} icon={<IC.Captions />} />
                 <Btn label={viewMode === "grid" ? "Speaker" : "Grid"} onClick={() => { onToggleView?.(); setShowMore(false); }} icon={viewMode === "grid" ? <IC.Speaker /> : <IC.Grid />} />
                 <Btn label={isFullscreen ? "Exit" : "Fullscreen"} onClick={() => { onToggleFullscreen?.(); setShowMore(false); }} icon={isFullscreen ? <IC.ExitFullscreen /> : <IC.Fullscreen />} />

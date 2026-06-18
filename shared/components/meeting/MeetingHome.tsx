@@ -61,18 +61,73 @@ const CHECKLIST: ChecklistItem[] = [
 function NewMeetingModal({ onClose }: { onClose: () => void }) {
   const router = useRouter();
   const [meetingTitle, setMeetingTitle] = useState("");
+  const [agenda, setAgenda] = useState("");
   const [meetingType, setMeetingType] = useState<MeetingTypeValue>("general");
   const [error, setError] = useState("");
+  const [creating, setCreating] = useState(false);
 
   const slug = slugify(meetingTitle || "");
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     const title = meetingTitle.trim();
     if (!title) { setError("Please enter a meeting name."); return; }
+    if (creating) return;
+    setCreating(true);
     window.localStorage.setItem("draftmin.meetingType", meetingType);
-    router.push(
-      `/meeting/${encodeURIComponent(slug)}/prejoin?host=1&title=${encodeURIComponent(title)}&type=${meetingType}`
-    );
+    window.localStorage.setItem("draftmin.meetingAgenda", agenda.trim());
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const settings = { meeting_type: meetingType, mute_on_entry: false, screen_share_disabled: false };
+      const { data: existing } = await supabase
+        .from("meetings")
+        .select("id")
+        .eq("room_name", slug)
+        .maybeSingle();
+
+      let meetingId = existing?.id as string | undefined;
+      if (meetingId) {
+        await supabase
+          .from("meetings")
+          .update({ title, agenda: agenda.trim(), settings })
+          .eq("id", meetingId);
+        await supabase.from("meeting_agenda_items").delete().eq("meeting_id", meetingId);
+      } else {
+        const { data: created, error: createError } = await supabase
+          .from("meetings")
+          .insert({
+            room_name: slug,
+            title,
+            agenda: agenda.trim(),
+            host_id: user?.id ?? null,
+            is_active: false,
+            settings,
+          })
+          .select("id")
+          .single();
+        if (createError) throw createError;
+        meetingId = created?.id;
+      }
+
+      const agendaItems = agenda
+        .split(/\r?\n/)
+        .map((line) => line.replace(/^[-*\d.)\s]+/, "").trim())
+        .filter(Boolean)
+        .map((item, index) => ({ meeting_id: meetingId, title: item, position: index + 1 }));
+
+      if (meetingId && agendaItems.length) {
+        const { error: agendaError } = await supabase.from("meeting_agenda_items").insert(agendaItems);
+        if (agendaError) console.warn("Agenda save error:", agendaError);
+      }
+    } catch (e) {
+      console.warn("Meeting pre-create failed:", e);
+    } finally {
+      setCreating(false);
+    }
+
+    const params = new URLSearchParams({ host: "1", title, type: meetingType });
+    if (agenda.trim()) params.set("agenda", agenda.trim());
+    router.push(`/meeting/${encodeURIComponent(slug)}/prejoin?${params.toString()}`);
   };
 
   return (
@@ -143,6 +198,21 @@ function NewMeetingModal({ onClose }: { onClose: () => void }) {
           </div>
         </div>
 
+        {/* Agenda */}
+        <div>
+          <label className="block text-xs font-medium text-stone-500 uppercase tracking-wide mb-2">
+            Agenda
+          </label>
+          <textarea
+            value={agenda}
+            onChange={e => setAgenda(e.target.value)}
+            placeholder={"One agenda item per line...\nBudget approval\nHiring plan\nProduct launch risks"}
+            rows={5}
+            className="w-full resize-none rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3 text-sm text-stone-900 placeholder:text-stone-300 outline-none focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-100 transition"
+          />
+          <p className="mt-2 text-[11px] text-stone-400">People joining before the host can read this agenda.</p>
+        </div>
+
         {/* Actions */}
         <div className="flex gap-3 pt-1">
           <button
@@ -155,12 +225,13 @@ function NewMeetingModal({ onClose }: { onClose: () => void }) {
           <button
             type="button"
             onClick={handleCreate}
-            className="h-12 flex-1 rounded-full bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-sm font-medium text-white transition flex items-center justify-center gap-2"
+            disabled={creating}
+            className="h-12 flex-1 rounded-full bg-blue-600 hover:bg-blue-700 active:scale-[0.98] disabled:opacity-60 text-sm font-medium text-white transition flex items-center justify-center gap-2"
           >
             <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 5v14M5 12h14" />
             </svg>
-            Create meeting
+            {creating ? "Creating..." : "Create meeting"}
           </button>
         </div>
       </div>

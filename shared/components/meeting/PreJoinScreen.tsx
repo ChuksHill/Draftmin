@@ -4,7 +4,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/shared/lib/supabase/client";
 
-type PreJoinScreenProps = { roomName: string };
+type PreJoinScreenProps = {
+  roomName: string;
+  initialTitle?: string;
+  initialMeetingType?: string;
+  initialAgenda?: string;
+};
 
 function initialsFromName(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -12,7 +17,7 @@ function initialsFromName(name: string) {
   return ((parts[0]?.[0] ?? "") + (parts.length > 1 ? parts[parts.length - 1]?.[0] ?? "" : "")).toUpperCase();
 }
 
-export function PreJoinScreen({ roomName }: PreJoinScreenProps) {
+export function PreJoinScreen({ roomName, initialTitle, initialMeetingType, initialAgenda }: PreJoinScreenProps) {
   const router = useRouter();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -24,10 +29,16 @@ export function PreJoinScreen({ roomName }: PreJoinScreenProps) {
   const [linkCopied, setLinkCopied] = useState(false);
   const [joining, setJoining] = useState(false);
   const [meetingType, setMeetingType] = useState<string>(() => {
+    if (initialMeetingType?.trim()) return initialMeetingType.trim();
     if (typeof window !== "undefined") {
       return window.localStorage.getItem("draftmin.meetingType") || "general";
     }
     return "general";
+  });
+  const [meetingTitle, setMeetingTitle] = useState(initialTitle?.trim() || roomName);
+  const [agendaItems, setAgendaItems] = useState<string[]>(() => {
+    const source = initialAgenda?.trim() || "";
+    return source.split(/\r?\n/).map((line) => line.replace(/^[-*\d.)\s]+/, "").trim()).filter(Boolean);
   });
 
   const initials = useMemo(() => initialsFromName(displayName || "Guest"), [displayName]);
@@ -77,6 +88,44 @@ export function PreJoinScreen({ roomName }: PreJoinScreenProps) {
     }
     void loadProfileName();
   }, []);
+
+  useEffect(() => {
+    async function loadMeetingContext() {
+      try {
+        const { data: meeting } = await supabase
+          .from("meetings")
+          .select("id, title, agenda, settings")
+          .eq("room_name", roomName)
+          .maybeSingle();
+
+        if (!meeting) return;
+        if (meeting.title) setMeetingTitle(meeting.title);
+        const settings = meeting.settings as { meeting_type?: string } | null;
+        if (settings?.meeting_type) setMeetingType(settings.meeting_type);
+
+        const { data: items } = await supabase
+          .from("meeting_agenda_items")
+          .select("title, position")
+          .eq("meeting_id", meeting.id)
+          .order("position", { ascending: true });
+
+        const savedItems = items?.map((item) => item.title).filter(Boolean) ?? [];
+        if (savedItems.length) {
+          setAgendaItems(savedItems);
+        } else if (meeting.agenda) {
+          setAgendaItems(
+            String(meeting.agenda)
+              .split(/\r?\n/)
+              .map((line) => line.replace(/^[-*\d.)\s]+/, "").trim())
+              .filter(Boolean)
+          );
+        }
+      } catch (err) {
+        console.warn("Failed to load meeting agenda:", err);
+      }
+    }
+    void loadMeetingContext();
+  }, [roomName]);
 
   /* ── camera / mic preview ───────────────────────────────────────────── */
   useEffect(() => {
@@ -180,9 +229,16 @@ export function PreJoinScreen({ roomName }: PreJoinScreenProps) {
     }
     if (videoRef.current) videoRef.current.srcObject = null;
 
-    router.push(
-      `/meeting/${encodeURIComponent(roomName)}?name=${encodeURIComponent(safeName)}&mic=${micOn ? "1" : "0"}&cam=${cameraOn ? "1" : "0"}&type=${encodeURIComponent(meetingType)}`,
-    );
+    const params = new URLSearchParams({
+      name: safeName,
+      mic: micOn ? "1" : "0",
+      cam: cameraOn ? "1" : "0",
+      type: meetingType,
+      title: meetingTitle,
+    });
+    if (agendaItems.length) params.set("agenda", agendaItems.join("\n"));
+
+    router.push(`/meeting/${encodeURIComponent(roomName)}?${params.toString()}`);
   };
 
   const copyLink = () => {
@@ -215,7 +271,7 @@ export function PreJoinScreen({ roomName }: PreJoinScreenProps) {
         {/* ── body ── */}
         <div className="mb-8 text-center">
           <h1 className="text-2xl sm:text-3xl font-medium text-stone-900 tracking-tight">Ready to join?</h1>
-          <p className="mt-1.5 sm:mt-2 text-sm text-stone-400">Check your camera and microphone, then enter your name.</p>
+          <p className="mt-1.5 sm:mt-2 text-sm text-stone-400">{meetingTitle} - check your camera and microphone, then enter your name.</p>
         </div>
 
         <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
@@ -435,6 +491,28 @@ export function PreJoinScreen({ roomName }: PreJoinScreenProps) {
               <p className="mt-2.5 text-[11px] text-stone-400 leading-relaxed">
                 Each person who opens this link gets their own identity — no collisions, no dropped sessions.
               </p>
+            </div>
+
+            {/* Agenda */}
+            <div className="rounded-2xl bg-white border border-stone-100 p-4 sm:p-5 shadow-sm">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-medium text-stone-500 uppercase tracking-wide">Agenda</span>
+                <span className="text-[11px] text-stone-400">{agendaItems.length || "No"} items</span>
+              </div>
+              {agendaItems.length ? (
+                <ol className="space-y-2">
+                  {agendaItems.map((item, index) => (
+                    <li key={`${item}-${index}`} className="flex gap-2 rounded-xl border border-stone-100 bg-stone-50 px-3 py-2.5">
+                      <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-blue-50 text-[10px] font-semibold text-blue-600">
+                        {index + 1}
+                      </span>
+                      <span className="text-xs text-stone-600 leading-relaxed">{item}</span>
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <p className="text-xs text-stone-400 leading-relaxed">No agenda has been shared for this room yet.</p>
+              )}
             </div>
           </div>
         </div>
