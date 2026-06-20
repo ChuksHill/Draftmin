@@ -16,6 +16,37 @@ function normalizeLang(value: string | null | undefined) {
   const [base] = trimmed.split("-");
   return { raw: trimmed, base: base?.toLowerCase() };
 }
+function isUsableTranscriptText(text: string) {
+  const trimmed = text.replace(/\s+/g, " ").trim();
+  if (!trimmed || /^[\s.,!?;:-]+$/.test(trimmed)) return false;
+
+  const normalized = trimmed.toLowerCase();
+  const hallucinationMarkers = [
+    "use proper punctuation",
+    "capitalize names and acronyms",
+    "learn more at",
+    "please subscribe",
+    "subscribe to my channel",
+    "subtitles by",
+    "amara.org",
+    "to be continued",
+    "u.s. department of defense",
+    "u.s. department of health and human services",
+    "u.s. money reserve",
+  ];
+  if (hallucinationMarkers.some((marker) => normalized.includes(marker))) return false;
+
+  const words = normalized.match(/[a-z0-9']+/g) ?? [];
+  if (!words.length) return false;
+  if (words.length === 1 && words[0].length <= 2) return false;
+  if (words.length > 8 && new Set(words).size / words.length < 0.35) return false;
+
+  return true;
+}
+function cleanTranscriptText(text: string) {
+  const cleaned = text.replace(/\s+/g, " ").trim();
+  return isUsableTranscriptText(cleaned) ? cleaned : "";
+}
 
 async function transcribeWithDeepgram(params: {
   audio: ArrayBuffer;
@@ -33,7 +64,6 @@ async function transcribeWithDeepgram(params: {
   url.searchParams.set("numerals", "true");
   url.searchParams.set("filler_words", "false");
   url.searchParams.set("utterances", "false");
-  url.searchParams.set("endpointing", "300");
   if (params.lang) url.searchParams.set("language", params.lang);
 
   const response = await fetch(url.toString(), {
@@ -51,10 +81,15 @@ async function transcribeWithDeepgram(params: {
   }
 
   const data = (await response.json()) as {
-    results?: { channels?: Array<{ alternatives?: Array<{ transcript?: string }> }> };
+    results?: { channels?: Array<{ alternatives?: Array<{ transcript?: string; confidence?: number }> }> };
   };
 
-  return data.results?.channels?.[0]?.alternatives?.[0]?.transcript?.trim() ?? "";
+  const alternative = data.results?.channels?.[0]?.alternatives?.[0];
+  const confidence = alternative?.confidence ?? 1;
+  const minConfidence = Number.parseFloat(process.env.STT_DEEPGRAM_MIN_CONFIDENCE ?? "0.55");
+  if (Number.isFinite(minConfidence) && confidence < minConfidence) return "";
+
+  return cleanTranscriptText(alternative?.transcript ?? "");
 }
 
 async function transcribeWithWhisper(params: {
@@ -67,7 +102,8 @@ async function transcribeWithWhisper(params: {
     form.set("model", model);
     form.set("temperature", "0");
     form.set("response_format", "json");
-    form.set("prompt", "This is a professional meeting or conversation. Use proper punctuation, capitalize names and acronyms.");
+    const prompt = process.env.WHISPER_TRANSCRIPTION_PROMPT?.trim();
+    if (prompt) form.set("prompt", prompt);
     if (params.langBase) form.set("language", params.langBase);
 
     // Whisper relies heavily on the file extension to determine the decoder
@@ -90,17 +126,7 @@ async function transcribeWithWhisper(params: {
       });
       if (res.ok) {
         const data = (await res.json()) as { text?: string };
-        const t = data.text?.trim() ?? "";
-
-        // Filter Groq Whisper hallucinations
-        const hallucinations = [
-          "subtitles by amara.org", "thank you.", "thank you", "s.", "thanks", "bye.", "bye",
-          "please subscribe", "subscribe to my channel", "subtitles by", "amara.org",
-          "you", "to be continued", "to be continued.", "that's it."
-        ];
-        if (hallucinations.includes(t.toLowerCase())) return "";
-
-        return t;
+        return cleanTranscriptText(data.text ?? "");
       }
       console.warn(`Groq Whisper (${res.status}), falling back to OpenAI.`);
     } catch (e) {
@@ -125,17 +151,7 @@ async function transcribeWithWhisper(params: {
   }
 
   const data = (await res.json()) as { text?: string };
-  const t = data.text?.trim() ?? "";
-
-  // Filter out notorious Whisper hallucinations on silent/noisy chunks
-  const hallucinations = [
-    "subtitles by amara.org", "thank you.", "thank you", "thanks.", "thanks", "bye.", "bye",
-    "please subscribe", "subscribe to my channel", "subtitles by", "amara.org",
-    "you", "to be continued", "to be continued.", "that's it."
-  ];
-  if (hallucinations.includes(t.toLowerCase())) return "";
-
-  return t;
+  return cleanTranscriptText(data.text ?? "");
 }
 
 export async function POST(request: Request) {
@@ -174,7 +190,7 @@ export async function POST(request: Request) {
           provider === "deepgram"
             ? await transcribeWithDeepgram({ audio, contentType, lang: lang?.raw })
             : await transcribeWithWhisper({ audio, contentType, langBase: lang?.base });
-        return NextResponse.json({ provider, text });
+        return NextResponse.json({ provider, text: cleanTranscriptText(text) });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         console.warn(`[stt] provider failed: ${provider}`, message);

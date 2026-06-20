@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/shared/lib/supabase/client";
+import { MobileBackHeader } from "@/shared/components/MobileBackHeader";
 
 type Meeting = {
   id: string; room_name: string; title: string;
@@ -74,11 +75,34 @@ export function MeetingsList() {
   }, {});
 
   return (
-    <div className="mx-auto max-w-3xl">
-      <div className="mb-6">
-        <h1 className="text-xl font-bold text-slate-900 text-blue-600">Meetings</h1>
-        <p className="text-sm text-slate-500 mt-0.5">All your past and upcoming meeting sessions.</p>
-      </div>
+    <>
+      <MobileBackHeader title="Meetings" />
+      <div className="mx-auto max-w-3xl px-4 py-6 sm:py-8 sm:px-6">
+        {/* Desktop Back button */}
+        <button
+          type="button"
+          onClick={() => router.push("/meeting")}
+          className="hidden sm:flex items-center gap-2 text-xs font-semibold text-slate-500 hover:text-slate-800 transition mb-6 group"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            className="h-4 w-4 transition-transform group-hover:-translate-x-0.5"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <line x1="19" y1="12" x2="5" y2="12" />
+            <polyline points="12 19 5 12 12 5" />
+          </svg>
+          Back to Dashboard
+        </button>
+
+        <div className="mb-6">
+          <h1 className="text-xl font-bold text-slate-900 text-blue-600">Meetings</h1>
+          <p className="text-sm text-slate-500 mt-0.5">All your past and upcoming meeting sessions.</p>
+        </div>
 
       {/* Toolbar */}
       <div className="flex items-center gap-3 mb-5 flex-wrap">
@@ -176,6 +200,7 @@ export function MeetingsList() {
           ))}
         </div>
       )}
-    </div>
+      </div>
+    </>
   );
 }

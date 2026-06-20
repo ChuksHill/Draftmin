@@ -83,6 +83,43 @@ function parseAgendaText(source?: string | null) {
     .map((line) => line.replace(/^[-*\d.)\s]+/, "").trim())
     .filter(Boolean);
 }
+function agendaItemsFromTitles(titles: string[], idPrefix: string): AgendaItem[] {
+  return titles.map((item, index) => ({
+    id: `${idPrefix}-${index}`,
+    title: item,
+    position: index + 1,
+    is_completed: false,
+    decision_summary: "",
+    decided_by: [],
+  }));
+}
+function isUsableTranscriptText(text: string) {
+  const trimmed = text.replace(/\s+/g, " ").trim();
+  if (!trimmed || /^[\s.,!?;:-]+$/.test(trimmed)) return false;
+
+  const normalized = trimmed.toLowerCase();
+  const hallucinationMarkers = [
+    "use proper punctuation",
+    "capitalize names and acronyms",
+    "learn more at",
+    "please subscribe",
+    "subscribe to my channel",
+    "subtitles by",
+    "amara.org",
+    "to be continued",
+    "u.s. department of defense",
+    "u.s. department of health and human services",
+    "u.s. money reserve",
+  ];
+  if (hallucinationMarkers.some((marker) => normalized.includes(marker))) return false;
+
+  const words = normalized.match(/[a-z0-9']+/g) ?? [];
+  if (!words.length) return false;
+  if (words.length === 1 && words[0].length <= 2) return false;
+  if (words.length > 8 && new Set(words).size / words.length < 0.35) return false;
+
+  return true;
+}
 
 /* ─── Toast system ───────────────────────────────────────────────────────── */
 function ToastContainer({ toasts, onDismiss }: { toasts: ToastItem[]; onDismiss: (id: string) => void }) {
@@ -960,17 +997,18 @@ function RoomTranscriptionController({ sttDisabled, sttLang, sttChunkMs, speechR
   }, [localParticipant]);
 
   const finalize = useCallback((text: string) => {
-    if (!text.trim() || cancelledRef.current) return;
+    const cleanText = text.replace(/\s+/g, " ").trim();
+    if (!isUsableTranscriptText(cleanText) || cancelledRef.current) return;
     const display = identityToDisplay(identity);
-    const line = `${display}: ${text}`;
+    const line = `${display}: ${cleanText}`;
     onCaptionsChange((c) => [...c, line]);
-    broadcast(text);
+    broadcast(cleanText);
     // Save to Supabase immediately for persistence
     if (meetingId) {
       void supabase.from("transcripts").insert({
         meeting_id: meetingId,
         speaker_name: display,
-        transcript_text: text
+        transcript_text: cleanText
       });
     }
   }, [identity, onCaptionsChange, broadcast, meetingId]);
@@ -982,8 +1020,9 @@ function RoomTranscriptionController({ sttDisabled, sttLang, sttChunkMs, speechR
       if (cancelledRef.current) return;
       try {
         const d = JSON.parse(new TextDecoder().decode(payload));
-        if (d.type === "caption" && d.sender !== identity) {
-          const line = `${identityToDisplay(d.sender)}: ${d.text}`;
+        const cleanText = String(d.text ?? "").replace(/\s+/g, " ").trim();
+        if (d.type === "caption" && d.sender !== identity && isUsableTranscriptText(cleanText)) {
+          const line = `${identityToDisplay(d.sender)}: ${cleanText}`;
           onCaptionsChange((c) => c.includes(line) ? c : [...c, line]);
         }
       } catch { /* ignore */ }
@@ -1085,7 +1124,43 @@ function RoomTranscriptionController({ sttDisabled, sttLang, sttChunkMs, speechR
       }
       const d = await res.json() as { text?: string; error?: string };
       if (d.error) throw new Error(d.error);
-      return (d.text ?? "").trim();
+      const text = (d.text ?? "").replace(/\s+/g, " ").trim();
+      return isUsableTranscriptText(text) ? text : "";
+    };
+
+    const shouldSendAudioChunk = async (blob: Blob) => {
+      if (blob.size < 1800) return false;
+      const AudioContextCtor = (window as any).AudioContext ?? (window as any).webkitAudioContext;
+      if (!AudioContextCtor) return true;
+
+      try {
+        const arrayBuffer = await blob.arrayBuffer();
+        const ctx = new AudioContextCtor() as AudioContext;
+        const decoded = await ctx.decodeAudioData(arrayBuffer.slice(0));
+        const data = decoded.getChannelData(0);
+        const step = Math.max(1, Math.floor(data.length / 8000));
+        let sumSquares = 0;
+        let peak = 0;
+        let activeSamples = 0;
+        let samples = 0;
+
+        for (let i = 0; i < data.length; i += step) {
+          const value = Math.abs(data[i]);
+          peak = Math.max(peak, value);
+          sumSquares += value * value;
+          if (value > 0.012) activeSamples++;
+          samples++;
+        }
+
+        await ctx.close().catch(() => undefined);
+
+        if (!samples) return false;
+        const rms = Math.sqrt(sumSquares / samples);
+        const activeRatio = activeSamples / samples;
+        return rms >= 0.006 || peak >= 0.045 || activeRatio >= 0.015;
+      } catch {
+        return blob.size > 5000;
+      }
     };
 
     const startServerSTT = async (provider: "deepgram" | "whisper"): Promise<() => void> => {
@@ -1118,6 +1193,7 @@ function RoomTranscriptionController({ sttDisabled, sttLang, sttChunkMs, speechR
             processingQueueRef.current = processingQueueRef.current.then(async () => {
               if (cancelledRef.current || activeProviderRef.current !== provider) return;
               try {
+                if (!(await shouldSendAudioChunk(chunkBlob))) return;
                 const text = await transcribeChunk(provider, chunkBlob);
                 if (text && !cancelledRef.current) {
                   finalize(text);
@@ -1665,7 +1741,7 @@ export function LiveMeetingRoom({ roomName, identity, title = "Meeting", startWi
   const [dmTarget, setDmTarget] = useState<string | null>(null);
   const [meetingEndedByHost, setMeetingEndedByHost] = useState(false);
   const [resolvedIsHost, setResolvedIsHost] = useState<boolean | null>(null);
-  const [agendaItems, setAgendaItems] = useState<AgendaItem[]>([]);
+  const [agendaItems, setAgendaItems] = useState<AgendaItem[]>(() => agendaItemsFromTitles(parseAgendaText(initialAgenda), "local-initial"));
   const [agendaSummaryStatus, setAgendaSummaryStatus] = useState<Record<string, "generating" | "error">>({});
   const seededAgendaRef = useRef(false);
 
@@ -1780,6 +1856,12 @@ export function LiveMeetingRoom({ roomName, identity, title = "Meeting", startWi
 
   /* Meeting sync */
   useEffect(() => {
+    const initialTitles = parseAgendaText(initialAgenda);
+    if (!initialTitles.length) return;
+    setAgendaItems((items) => items.length ? items : agendaItemsFromTitles(initialTitles, "local-initial"));
+  }, [initialAgenda]);
+
+  useEffect(() => {
     void ensureMeeting(roomName, identity, title, meetingType, initialAgenda).then((mId) => {
       setMeetingId(mId);
       if (mId && hasJoinedRoomRef.current) {
@@ -1790,6 +1872,7 @@ export function LiveMeetingRoom({ roomName, identity, title = "Meeting", startWi
 
   useEffect(() => {
     if (!meetingId) return;
+    seededAgendaRef.current = false;
 
     async function loadAgenda() {
       const { data, error } = await supabase
@@ -1815,8 +1898,9 @@ export function LiveMeetingRoom({ roomName, identity, title = "Meeting", startWi
 
       if (meetingError) console.warn("Meeting agenda fallback error:", meetingError);
 
-      const fallbackTitles = parseAgendaText(initialAgenda).length
-        ? parseAgendaText(initialAgenda)
+      const initialTitles = parseAgendaText(initialAgenda);
+      const fallbackTitles = initialTitles.length
+        ? initialTitles
         : parseAgendaText(meeting?.agenda);
 
       if (!fallbackTitles.length) {
@@ -1824,15 +1908,7 @@ export function LiveMeetingRoom({ roomName, identity, title = "Meeting", startWi
         return;
       }
 
-      const fallbackItems = fallbackTitles.map((item, index) => ({
-        id: `local-${meetingId}-${index}`,
-        title: item,
-        position: index + 1,
-        is_completed: false,
-        decision_summary: "",
-        decided_by: [],
-      }));
-      setAgendaItems(fallbackItems);
+      setAgendaItems(agendaItemsFromTitles(fallbackTitles, `local-${meetingId}`));
 
       if (seededAgendaRef.current) return;
       seededAgendaRef.current = true;
@@ -1851,7 +1927,18 @@ export function LiveMeetingRoom({ roomName, identity, title = "Meeting", startWi
         console.warn("Agenda fallback seed error:", insertError);
         return;
       }
-      if (inserted?.length) setAgendaItems(inserted as AgendaItem[]);
+      if (inserted?.length) {
+        setAgendaItems((current) => (inserted as AgendaItem[]).map((row) => {
+          const localMatch = current.find((item) => item.title === row.title && item.id.startsWith("local-"));
+          return localMatch
+            ? {
+                ...row,
+                is_completed: row.is_completed || localMatch.is_completed,
+                decision_summary: row.decision_summary || localMatch.decision_summary,
+              }
+            : row;
+        }));
+      }
     }
 
     void loadAgenda();

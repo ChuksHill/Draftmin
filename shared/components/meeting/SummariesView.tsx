@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/shared/lib/supabase/client";
 import { MarkdownRenderer } from "@/shared/components/ui/MarkdownRenderer";
+import { MobileBackHeader } from "@/shared/components/MobileBackHeader";
 
 type Meeting = { id: string; room_name: string; title: string; created_at: string };
 type ActionItem = { id: string; task: string; assignee: string; priority: string; is_completed: boolean };
@@ -24,6 +26,7 @@ function SkeletonRow() {
 }
 
 export function SummariesView() {
+  const router = useRouter();
   const [summaries, setSummaries] = useState<Summary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -108,13 +111,36 @@ export function SummariesView() {
     new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
   return (
-    <div className="mx-auto max-w-5xl">
-      <div className="mb-6 flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-bold text-slate-900">AI Meeting Minutes</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Secretary-quality summaries generated after every meeting.</p>
+    <>
+      <MobileBackHeader title="AI Summaries" />
+      <div className="mx-auto max-w-5xl px-4 py-6 sm:py-8 sm:px-6">
+        {/* Desktop Back button */}
+        <button
+          type="button"
+          onClick={() => router.push("/meeting")}
+          className="hidden sm:flex items-center gap-2 text-xs font-semibold text-slate-500 hover:text-slate-800 transition mb-6 group"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            className="h-4 w-4 transition-transform group-hover:-translate-x-0.5"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <line x1="19" y1="12" x2="5" y2="12" />
+            <polyline points="12 19 5 12 12 5" />
+          </svg>
+          Back to Dashboard
+        </button>
+
+        <div className="mb-6 flex items-center justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-bold text-slate-900">AI Meeting Minutes</h1>
+            <p className="text-sm text-slate-500 mt-0.5">Secretary-quality summaries generated after every meeting.</p>
+          </div>
         </div>
-      </div>
 
       {error && (
         <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
@@ -241,5 +267,6 @@ export function SummariesView() {
         </main>
       </div>
     </div>
+    </>
   );
 }
