@@ -87,25 +87,25 @@ export function Header() {
             </nav>
 
             {/* Desktop auth */}
-            <div className="hidden md:flex items-center gap-3">
+            <div className="hidden md:flex items-center gap-4">
               {loadingUser ? (
-                <div className="h-9 w-24 rounded-xl bg-slate-100 animate-pulse" />
+                <div className="h-10 w-24 rounded-full bg-slate-100 animate-pulse" />
               ) : user ? (
                 <>
                   <Link
                     href="/meeting"
-                    className="px-4 py-2 rounded-xl bg-blue-600 text-white font-semibold text-sm hover:bg-blue-700 transition"
+                    className="px-5 py-2.5 rounded-full bg-[#0B5CFF] text-white font-semibold text-sm hover:bg-[#0048D4] transition shadow-md shadow-blue-500/20"
                   >
                     My Meetings
                   </Link>
                   <div className="relative group">
                     <button
                       type="button"
-                      className="h-9 w-9 rounded-xl bg-indigo-600 text-white text-sm font-semibold flex items-center justify-center hover:bg-indigo-700 transition"
+                      className="h-10 w-10 rounded-full bg-slate-800 text-white text-sm font-semibold flex items-center justify-center hover:bg-slate-900 transition"
                     >
                       {initialsFromEmail(user.email ?? 'U')}
                     </button>
-                    <div className="absolute right-0 top-full mt-2 w-48 bg-white border border-slate-200 rounded-2xl shadow-lg py-2 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-all">
+                    <div className="absolute right-0 top-full mt-2 w-48 bg-white border border-slate-200 rounded-xl shadow-lg py-2 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-all">
                       <div className="px-4 py-2 border-b border-slate-100">
                         <p className="text-xs font-semibold text-slate-900 truncate">{user.email}</p>
                       </div>
@@ -123,15 +123,15 @@ export function Header() {
                 <>
                   <Link
                     href="/auth/login"
-                    className="px-4 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-700 transition border border-slate-200 font-semibold text-sm"
+                    className="text-slate-600 hover:text-[#0B5CFF] transition font-semibold text-sm"
                   >
-                    Sign in
+                    Sign In
                   </Link>
                   <Link
                     href="/auth/signup"
-                    className="px-4 py-2 rounded-xl bg-blue-600 text-white font-semibold text-sm hover:bg-blue-700 transition"
+                    className="px-5 py-2.5 rounded-full bg-[#0B5CFF] text-white font-semibold text-sm hover:bg-[#0048D4] transition shadow-md shadow-blue-500/20"
                   >
-                    Get started
+                    Sign Up, It's Free
                   </Link>
                 </>
               )}
@@ -203,7 +203,7 @@ export function Header() {
         {/* Auth buttons */}
         <div className="px-4 pb-8 pt-4 border-t border-slate-100 space-y-3">
           {loadingUser ? (
-            <div className="h-11 rounded-xl bg-slate-100 animate-pulse" />
+            <div className="h-11 rounded-full bg-slate-100 animate-pulse" />
           ) : user ? (
             <>
               <div className="rounded-xl bg-slate-50 border border-slate-200 px-4 py-3 text-xs text-slate-500 truncate">
@@ -212,14 +212,14 @@ export function Header() {
               <Link
                 href="/meeting"
                 onClick={() => setMenuOpen(false)}
-                className="flex items-center justify-center h-11 w-full rounded-xl bg-blue-600 text-white font-semibold text-sm hover:bg-blue-700 transition"
+                className="flex items-center justify-center h-11 w-full rounded-full bg-[#0B5CFF] text-white font-semibold text-sm hover:bg-[#0048D4] transition"
               >
                 My Meetings
               </Link>
               <button
                 type="button"
                 onClick={handleSignOut}
-                className="flex items-center justify-center h-11 w-full rounded-xl border border-slate-200 text-red-600 font-semibold text-sm hover:bg-red-50 transition"
+                className="flex items-center justify-center h-11 w-full rounded-full border border-slate-200 text-red-600 font-semibold text-sm hover:bg-red-50 transition"
               >
                 Sign out
               </button>
@@ -229,16 +229,16 @@ export function Header() {
               <Link
                 href="/auth/login"
                 onClick={() => setMenuOpen(false)}
-                className="flex items-center justify-center h-11 w-full rounded-xl border border-slate-200 text-slate-700 font-semibold text-sm hover:bg-slate-50 transition"
+                className="flex items-center justify-center h-11 w-full rounded-full border border-slate-200 text-slate-700 font-semibold text-sm hover:bg-slate-50 transition"
               >
-                Sign in
+                Sign In
               </Link>
               <Link
                 href="/auth/signup"
                 onClick={() => setMenuOpen(false)}
-                className="flex items-center justify-center h-11 w-full rounded-xl bg-blue-600 text-white font-semibold text-sm hover:bg-blue-700 transition"
+                className="flex items-center justify-center h-11 w-full rounded-full bg-[#0B5CFF] text-white font-semibold text-sm hover:bg-[#0048D4] transition shadow-md shadow-blue-500/20"
               >
-                Get started
+                Sign Up, It's Free
               </Link>
             </>
           )}

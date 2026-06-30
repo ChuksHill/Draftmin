@@ -32,14 +32,14 @@
   --text-placeholder: #B0BBCC;
 
   /* Brand */
-  --brand:       #2563EB;
-  --brand-hover: #1D4ED8;
-  --brand-light: #EFF6FF;
+  --brand:       #0B5CFF;
+  --brand-hover: #0048D4;
+  --brand-light: #EBF1FF;
 
   /* Semantic */
-  --danger:        #DC2626;
-  --danger-light:  #FEF2F2;
-  --success:       #16A34A;
+  --danger:        #E8173D;
+  --danger-light:  #FDF2F4;
+  --success:       #008C68;
   --success-light: #F0FDF4;
   --warning:       #D97706;
   --warning-light: #FFFBEB;

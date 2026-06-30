@@ -290,7 +290,7 @@ function MeetingStage({
 
   if (isScreenSharing) {
     return (
-      <div className="h-full w-full flex flex-col lg:flex-row gap-2 p-3 pt-20">
+      <div className="h-full w-full flex flex-col lg:flex-row gap-2 p-2 sm:p-3 pt-[68px] pb-[84px]">
         <div className="flex-1 min-w-0 relative rounded-2xl overflow-hidden ring-1 ring-stone-200 bg-stone-900">
           <VideoTrack trackRef={screenTracks[0] as any} className="h-full w-full object-contain" />
           <div className="absolute bottom-3 left-3 flex items-center gap-2 rounded-full bg-black/70 backdrop-blur px-3 py-1.5 text-xs text-white">
@@ -326,7 +326,7 @@ function MeetingStage({
     const mainTrack = cameraTracks.find((t) => t.participant.identity === speakerIdentity) ?? cameraTracks[0];
     const others = cameraTracks.filter((t) => t !== mainTrack);
     return (
-      <div className="h-full w-full flex flex-col gap-2 p-3 pt-20 pb-28">
+      <div className="h-full w-full flex flex-col gap-2 p-2 sm:p-3 pt-[68px] pb-[84px]">
         <div className="flex-1 min-h-0 rounded-2xl overflow-hidden">
           <ParticipantTile trackRef={mainTrack} onClick={() => onTileClick(mainTrack.participant.identity)} />
         </div>
@@ -356,7 +356,7 @@ function MeetingStage({
 
   /* Grid view */
   return (
-    <div className={`h-full w-full p-2 sm:p-3 pt-20 pb-28 grid ${gridCols} auto-rows-fr gap-2 overflow-hidden relative`}>
+    <div className={`h-full w-full p-2 sm:p-3 pt-[68px] pb-[84px] grid ${gridCols} auto-rows-fr gap-2 overflow-hidden relative`}>
       <AnimatePresence>
         {cameraTracks.map((t) => (
           <motion.div
@@ -369,20 +369,6 @@ function MeetingStage({
             className="h-full w-full overflow-hidden relative"
           >
             <ParticipantTile trackRef={t} onClick={() => onTileClick(t.participant.identity)} />
-            {count === 1 && (
-              <div className="absolute inset-0 pointer-events-none flex items-center justify-center p-4">
-                <div className="rounded-2xl border border-stone-200 bg-white/90 backdrop-blur-md px-6 py-4 flex flex-col items-center gap-2 shadow-xl text-center max-w-sm">
-                  <div className="flex items-center gap-2">
-                    <div className="relative flex h-2 w-2">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
-                    </div>
-                    <span className="text-xs font-semibold text-stone-600 tracking-wide uppercase">Waiting for others to join</span>
-                  </div>
-                  <p className="text-xs text-stone-400 leading-relaxed">Share the meeting room name to invite others</p>
-                </div>
-              </div>
-            )}
           </motion.div>
         ))}
       </AnimatePresence>
@@ -509,23 +495,23 @@ function ChatView({
     const isImg = attachment?.type?.startsWith("image/");
     return (
       <div key={key} className={`flex flex-col gap-1 ${isOwn ? "items-end" : "items-start"}`}>
-        <span className="text-[10px] text-stone-400 px-1">{isOwn ? "You" : senderName}</span>
-        <div className={`max-w-[88%] rounded-2xl px-3 py-2 text-sm text-stone-800 break-words ${isOwn ? "bg-blue-500 text-white rounded-br-sm" : "bg-stone-100 rounded-bl-sm"}`}>
+        <span className="text-[10px] text-slate-500 px-1">{isOwn ? "You" : senderName}</span>
+        <div className={`max-w-[88%] rounded-2xl px-3 py-2 text-sm break-words ${isOwn ? "bg-blue-600 text-white rounded-br-sm" : "bg-slate-100 text-slate-800 border border-slate-200 rounded-bl-sm"}`}>
           {text && <p className="leading-relaxed whitespace-pre-wrap">{text}</p>}
           {attachment && (
             <div className="mt-1.5">
               {isImg ? (
-                <a href={attachment.url} target="_blank" rel="noopener noreferrer" className="block rounded-xl overflow-hidden border border-stone-200">
+                <a href={attachment.url} target="_blank" rel="noopener noreferrer" className={`block rounded-xl overflow-hidden border ${isOwn ? "border-white/10" : "border-slate-200"}`}>
                   <img src={attachment.url} alt={attachment.name} className="w-full h-auto max-h-40 object-cover" />
                 </a>
               ) : (
-                <a href={attachment.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 p-2 rounded-xl bg-stone-200 hover:bg-stone-300 transition">
-                  <div className="h-8 w-8 rounded-lg bg-blue-500/20 grid place-items-center shrink-0">
-                    <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4 text-blue-600" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                <a href={attachment.url} target="_blank" rel="noopener noreferrer" className={`flex items-center gap-2 p-2 rounded-xl transition ${isOwn ? "bg-white/10 hover:bg-white/15" : "bg-white border border-slate-200 hover:bg-slate-50"}`}>
+                  <div className={`h-8 w-8 rounded-lg grid place-items-center shrink-0 ${isOwn ? "bg-blue-500/20 text-blue-100" : "bg-blue-50 text-blue-600"}`}>
+                    <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                   </div>
                   <div className="min-w-0">
-                    <div className="text-xs text-stone-800 truncate">{attachment.name}</div>
-                    {attachment.size && <div className="text-[10px] text-stone-500">{(attachment.size / 1024).toFixed(0)} KB</div>}
+                    <div className={`text-xs truncate ${isOwn ? "text-white/90" : "text-slate-700"}`}>{attachment.name}</div>
+                    {attachment.size && <div className={`text-[10px] ${isOwn ? "text-white/60" : "text-slate-500"}`}>{(attachment.size / 1024).toFixed(0)} KB</div>}
                   </div>
                 </a>
               )}
@@ -547,15 +533,15 @@ function ChatView({
   ];
 
   return (
-    <div className="h-full flex flex-col bg-white">
-      <div className="flex border-b border-stone-200 shrink-0">
+    <div className="h-full flex flex-col">
+      <div className="flex border-b border-slate-200 shrink-0">
         <button type="button" onClick={() => setTab("everyone")}
-          className={`flex-1 py-2.5 text-xs font-medium transition ${tab === "everyone" ? "text-blue-600 border-b-2 border-blue-600" : "text-stone-500 hover:text-stone-700"}`}>
+          className={`flex-1 py-2.5 text-xs font-medium transition ${tab === "everyone" ? "text-blue-600 border-b-2 border-blue-600" : "text-slate-500 hover:text-slate-700"}`}>
           Everyone
         </button>
         {dmTarget && (
           <button type="button" onClick={() => setTab("dm")}
-            className={`flex-1 py-2.5 text-xs font-medium transition truncate px-2 ${tab === "dm" ? "text-blue-600 border-b-2 border-blue-600" : "text-stone-500 hover:text-stone-700"}`}>
+            className={`flex-1 py-2.5 text-xs font-medium transition truncate px-2 ${tab === "dm" ? "text-blue-600 border-b-2 border-blue-600" : "text-slate-500 hover:text-slate-700"}`}>
             DM: {identityToDisplay(dmTarget)}
           </button>
         )}
@@ -565,13 +551,13 @@ function ChatView({
         {tab === "everyone" ? (
           everyoneMessages.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 px-4 text-center my-auto">
-              <div className="h-12 w-12 rounded-2xl bg-stone-100 border border-stone-200 flex items-center justify-center mb-4 text-stone-400 shadow-inner">
+              <div className="h-12 w-12 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-center mb-4 text-slate-400">
                 <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                 </svg>
               </div>
-              <h3 className="text-sm font-semibold text-stone-700">No messages yet</h3>
-              <p className="text-xs text-stone-400 mt-1 max-w-[200px] leading-relaxed">Be the first to say hello or send a file to the team!</p>
+              <h3 className="text-sm font-semibold text-slate-700">No messages yet</h3>
+              <p className="text-xs text-slate-500 mt-1 max-w-[200px] leading-relaxed">Be the first to say hello or send a file to the team!</p>
             </div>
           ) : (
             everyoneMessages.map((m, i) => renderMessage(m, (m as any).id ?? `live-${i}`))
@@ -579,14 +565,14 @@ function ChatView({
         ) : (
           dmList.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 px-4 text-center my-auto">
-              <div className="h-12 w-12 rounded-2xl bg-stone-100 border border-stone-200 flex items-center justify-center mb-4 text-stone-400 shadow-inner">
+              <div className="h-12 w-12 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-center mb-4 text-slate-400">
                 <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
                   <path d="M7 11V7a5 5 0 0 1 10 0v4" />
                 </svg>
               </div>
-              <h3 className="text-sm font-semibold text-stone-700">Private Chat</h3>
-              <p className="text-xs text-stone-400 mt-1 max-w-[220px] leading-relaxed">This is the start of your private direct message history with {identityToDisplay(dmTarget ?? "")}.</p>
+              <h3 className="text-sm font-semibold text-slate-700">Private Chat</h3>
+              <p className="text-xs text-slate-500 mt-1 max-w-[220px] leading-relaxed">This is the start of your private direct message history with {identityToDisplay(dmTarget ?? "")}.</p>
             </div>
           ) : (
             dmList.map((m, i) => renderMessage({ from: m.from, message: m.text }, i))
@@ -595,11 +581,11 @@ function ChatView({
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="border-t border-stone-200 p-3 space-y-2 shrink-0">
+      <div className="border-t border-slate-200 p-3 space-y-2 shrink-0">
         {selectedFile && (
-          <div className="flex items-center justify-between gap-2 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2">
-            <span className="text-xs text-stone-600 truncate">{selectedFile.name}</span>
-            <button type="button" onClick={() => setSelectedFile(null)} className="text-stone-400 hover:text-stone-600 transition shrink-0">
+          <div className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+            <span className="text-xs text-slate-600 truncate">{selectedFile.name}</span>
+            <button type="button" onClick={() => setSelectedFile(null)} className="text-slate-400 hover:text-slate-600 transition shrink-0">
               <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M6 6l12 12M18 6 6 18" /></svg>
             </button>
           </div>
@@ -678,25 +664,25 @@ function ChatToastListener({
 function ParticipantsPanel({ onDM }: { onDM: (identity: string) => void }) {
   const participants = useParticipants();
   return (
-    <div className="flex-1 overflow-y-auto p-3 space-y-1.5 bg-white">
+    <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
       {participants.map((p) => (
-        <div key={p.identity} className="flex items-center gap-3 rounded-xl border border-stone-100 bg-stone-50 px-3 py-2.5">
+        <div key={p.identity} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
           <div className="h-8 w-8 rounded-xl bg-gradient-to-br from-blue-600 to-blue-500 grid place-items-center text-xs font-semibold text-white shrink-0">
             {getInitials(identityToDisplay(p.identity))}
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-sm text-stone-800 truncate">
-              {identityToDisplay(p.identity)}{p.isLocal && <span className="text-stone-400 ml-1 text-xs">(You)</span>}
+            <div className="text-sm text-slate-800 font-medium truncate">
+              {identityToDisplay(p.identity)}{p.isLocal && <span className="text-slate-400 font-normal ml-1 text-xs">(You)</span>}
             </div>
             <div className="flex items-center gap-2 mt-0.5">
               <span className={`h-1.5 w-1.5 rounded-full ${p.isMicrophoneEnabled ? "bg-emerald-500" : "bg-red-500"}`} />
-              <span className={`h-1.5 w-1.5 rounded-full ${p.isCameraEnabled ? "bg-emerald-500" : "bg-stone-300"}`} />
-              {p.isSpeaking && <span className="text-[10px] text-blue-600">Speaking</span>}
+              <span className={`h-1.5 w-1.5 rounded-full ${p.isCameraEnabled ? "bg-emerald-500" : "bg-white/20"}`} />
+              {p.isSpeaking && <span className="text-[10px] text-blue-400">Speaking</span>}
             </div>
           </div>
           {!p.isLocal && (
             <button type="button" onClick={() => onDM(p.identity)}
-              className="h-7 rounded-lg border border-stone-200 bg-white px-2.5 text-[10px] text-stone-600 hover:text-blue-600 hover:border-blue-200 transition shrink-0">
+              className="h-7 rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-[10px] text-slate-500 hover:text-slate-800 hover:border-blue-200 hover:bg-blue-50 transition shrink-0">
               DM
             </button>
           )}
@@ -717,21 +703,21 @@ function CaptionsPanel({
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [captions, interimCaption]);
 
   return (
-    <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-white">
-      <div className="flex items-start sm:items-center justify-between flex-col sm:flex-row gap-3 rounded-xl border border-stone-100 bg-stone-50 p-3 text-xs">
-        <span className="text-stone-500 leading-relaxed">Live captions appear here. Speak clearly with your mic on for best results.</span>
-        <div className="flex items-center gap-2 shrink-0 bg-white px-2.5 py-1.5 rounded-lg border border-stone-200">
+    <div className="flex-1 overflow-y-auto p-3 space-y-2">
+      <div className="flex items-start sm:items-center justify-between flex-col sm:flex-row gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs">
+        <span className="text-slate-500 leading-relaxed">Live captions appear here. Speak clearly with your mic on for best results.</span>
+        <div className="flex items-center gap-2 shrink-0 bg-white px-2.5 py-1.5 rounded-lg border border-slate-200">
           <span className={`relative flex h-2 w-2`}>
             {!captionError && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>}
             <span className={`relative inline-flex rounded-full h-2 w-2 ${captionError ? 'bg-red-500' : 'bg-emerald-500'}`}></span>
           </span>
-          <span className={`font-medium ${captionError ? 'text-red-600' : 'text-emerald-600'}`}>
+          <span className={`font-medium ${captionError ? 'text-red-400' : 'text-emerald-400'}`}>
             {captionError ? 'STT Inactive' : 'STT Active'}
           </span>
         </div>
       </div>
       {!speechRecognitionAvailable && providerOrder.includes("webspeech") && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
+        <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-300">
           Browser speech recognition not available. Enable Deepgram or Whisper via environment variables for better results.
         </div>
       )}
@@ -742,17 +728,17 @@ function CaptionsPanel({
         return (
           <div key={i} className="space-y-1">
             {speaker && <div className="text-[10px] text-blue-600 font-medium px-1">{speaker}</div>}
-            <div className="rounded-xl border border-stone-100 bg-stone-50 p-3 text-sm text-stone-700 leading-relaxed">{text}</div>
+            <div className="rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-800 leading-relaxed">{text}</div>
           </div>
         );
       })}
       {interimCaption && (
-        <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs text-blue-700 italic">{interimCaption}</div>
+        <div className="rounded-xl border border-blue-500/20 bg-blue-500/10 p-3 text-xs text-blue-300 italic">{interimCaption}</div>
       )}
       {!captions.length && !interimCaption && (
         <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
           <div className="relative flex items-center justify-center mb-4">
-            <div className="h-12 w-12 rounded-2xl bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600">
+            <div className="h-12 w-12 rounded-2xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-500">
               <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5 animate-pulse" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
                 <path d="M19 10v1a7 7 0 0 1-14 0v-1" />
@@ -764,8 +750,8 @@ function CaptionsPanel({
               <span className="relative inline-flex rounded-full h-3 w-3 bg-blue-500"></span>
             </span>
           </div>
-          <h3 className="text-sm font-semibold text-stone-700">Listening for speech...</h3>
-          <p className="text-xs text-stone-400 mt-1 max-w-[200px] leading-relaxed">Speak into your microphone to generate real-time captions.</p>
+          <h3 className="text-sm font-semibold text-slate-700">Listening for speech...</h3>
+          <p className="text-xs text-slate-500 mt-1 max-w-[200px] leading-relaxed">Speak into your microphone to generate real-time captions.</p>
         </div>
       )}
       <div ref={endRef} />
@@ -820,9 +806,8 @@ function AgendaPanel({
                   type="button"
                   onClick={() => onUpdateAgendaItem(item.id, { is_completed: !item.is_completed })}
                   disabled={!isHost}
-                  className={`mt-0.5 h-6 w-6 rounded-full border-2 grid place-items-center shrink-0 transition ${
-                    item.is_completed ? "border-emerald-500 bg-emerald-500 text-white" : "border-stone-300 bg-white text-transparent hover:border-blue-300"
-                  } ${isHost ? "" : "cursor-not-allowed opacity-60"}`}
+                  className={`mt-0.5 h-6 w-6 rounded-full border-2 grid place-items-center shrink-0 transition ${item.is_completed ? "border-emerald-500 bg-emerald-500 text-white" : "border-stone-300 bg-white text-transparent hover:border-blue-300"
+                    } ${isHost ? "" : "cursor-not-allowed opacity-60"}`}
                   aria-label={item.is_completed ? "Mark agenda item untreated" : "Mark agenda item treated"}
                   title={isHost ? undefined : "Only the host can complete agenda items"}
                 >
@@ -905,10 +890,10 @@ function SidePanel({
   const panelTitle = activePanel === "participants" ? "People" : activePanel === "chat" ? "Chat" : activePanel === "agenda" ? "Agenda" : "Live Captions";
 
   return (
-    <div className="h-full flex flex-col bg-white border-l border-stone-200">
-      <div className="flex items-center justify-between px-4 py-3.5 border-b border-stone-200 shrink-0">
-        <span className="text-sm font-semibold text-stone-800">{panelTitle}</span>
-        <button type="button" onClick={onClose} className="h-8 w-8 rounded-xl border border-stone-200 bg-white text-stone-500 hover:text-stone-700 hover:bg-stone-50 transition grid place-items-center">
+    <div className="h-full flex flex-col bg-transparent">
+      <div className="flex items-center justify-between px-4 py-3.5 border-b border-slate-200 shrink-0">
+        <span className="text-sm font-semibold text-slate-800">{panelTitle}</span>
+        <button type="button" onClick={onClose} className="h-8 w-8 rounded-xl border border-slate-200 bg-slate-50 text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition grid place-items-center">
           <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M6 6l12 12M18 6 6 18" /></svg>
         </button>
       </div>
@@ -1651,7 +1636,6 @@ async function ensureMeeting(roomName: string, hostIdentity: string, title?: str
         is_active: true,
         host_id: existing.host_id ?? hostId,
         title: title?.trim() || roomName,
-        ...(initialAgenda?.trim() ? { agenda: initialAgenda.trim() } : {}),
         settings: { ...currentSettings, meeting_type: meetingType || currentSettings.meeting_type || "general", host_identity: hostIdentity },
       }).eq("id", existing.id);
       return existing.id;
@@ -1662,7 +1646,6 @@ async function ensureMeeting(roomName: string, hostIdentity: string, title?: str
       .insert({
         room_name: roomName,
         title: title?.trim() || roomName,
-        agenda: initialAgenda?.trim() || "",
         host_id: hostId,
         is_active: true,
         settings: { meeting_type: meetingType || "general", host_identity: hostIdentity, mute_on_entry: false, screen_share_disabled: false },
@@ -1932,10 +1915,10 @@ export function LiveMeetingRoom({ roomName, identity, title = "Meeting", startWi
           const localMatch = current.find((item) => item.title === row.title && item.id.startsWith("local-"));
           return localMatch
             ? {
-                ...row,
-                is_completed: row.is_completed || localMatch.is_completed,
-                decision_summary: row.decision_summary || localMatch.decision_summary,
-              }
+              ...row,
+              is_completed: row.is_completed || localMatch.is_completed,
+              decision_summary: row.decision_summary || localMatch.decision_summary,
+            }
             : row;
         }));
       }
@@ -2155,7 +2138,7 @@ export function LiveMeetingRoom({ roomName, identity, title = "Meeting", startWi
 
   return (
     <ErrorBoundary>
-      <div ref={containerRef} className="h-screen w-full bg-stone-50" onMouseMove={revealControls} onTouchStart={revealControls}>
+      <div ref={containerRef} className="h-[100dvh] w-full bg-[#111111]" onMouseMove={revealControls} onTouchStart={revealControls}>
         <LiveKitRoom
           serverUrl={tokenData.url}
           token={tokenData.token}

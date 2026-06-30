@@ -1,7 +1,7 @@
 "use client";
 
 import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
-import { StartAudio, useLocalParticipant, useRoomContext } from "@livekit/components-react";
+import { useLocalParticipant, useRoomContext } from "@livekit/components-react";
 
 export type MeetingPanel = "participants" | "chat" | "captions" | "agenda" | null;
 
@@ -108,22 +108,22 @@ const IC = {
   ),
   More: () => (
     <svg viewBox="0 0 24 24" fill="none" className="h-[18px] w-[18px]" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-      <circle cx="12" cy="5" r="1" fill="currentColor" />
+      <circle cx="5" cy="12" r="1" fill="currentColor" />
       <circle cx="12" cy="12" r="1" fill="currentColor" />
-      <circle cx="12" cy="19" r="1" fill="currentColor" />
+      <circle cx="19" cy="12" r="1" fill="currentColor" />
     </svg>
   ),
 };
 
-/* ── Reusable button atoms ─────────────────────────────────────────────── */
+/* ── Button atom ───────────────────────────────────────────────────────── */
 function Btn({
-  label, danger, active, onClick, icon, disabled, className = "",
+  label, danger, active, onClick, icon, disabled, compact = false,
 }: {
   label: string; danger?: boolean; active?: boolean; onClick?: () => void;
-  icon: ReactNode; disabled?: boolean; className?: string;
+  icon: ReactNode; disabled?: boolean; compact?: boolean;
 }) {
   return (
-    <div className={`flex flex-col items-center gap-1 ${className}`}>
+    <div className="flex flex-col items-center gap-0.5">
       <button
         type="button"
         onClick={onClick}
@@ -131,36 +131,76 @@ function Btn({
         title={label}
         aria-label={label}
         className={[
-          "h-11 w-11 rounded-full flex items-center justify-center transition-all active:scale-90 disabled:opacity-40",
-          danger ? "bg-red-500/20 border border-red-500/30 text-red-400 hover:bg-red-500/30"
-          : active ? "bg-blue-500/20 border border-blue-500/30 text-blue-400"
-          : "bg-white/10 border border-white/[0.08] text-white hover:bg-white/20",
+          compact ? "h-9 w-9" : "h-10 w-10",
+          "rounded-full flex items-center justify-center transition-all active:scale-90 disabled:opacity-40",
+          danger
+            ? "bg-red-500/20 border border-red-500/30 text-red-400 hover:bg-red-500/30"
+            : active
+            ? "bg-[#0B5CFF]/20 border border-[#0B5CFF]/40 text-[#4f8cff]"
+            : "bg-white/10 border border-white/[0.08] text-white hover:bg-white/20",
         ].join(" ")}
-      >{icon}</button>
-      <span className={`text-[9px] leading-none select-none ${active ? "text-blue-400/80" : "text-white/30"}`}>{label}</span>
+      >
+        {icon}
+      </button>
+      <span className={`text-[9px] leading-none select-none mt-0.5 ${active ? "text-[#4f8cff]" : "text-white/40"}`}>
+        {label}
+      </span>
     </div>
   );
 }
 
+/* ── Row divider ───────────────────────────────────────────────────────── */
+function Divider() {
+  return <div className="h-8 w-px bg-white/10 mx-1 self-center" />;
+}
+
+/* ── End/Leave button ──────────────────────────────────────────────────── */
 function EndBtn({ onClick, isHost }: { onClick?: () => void; isHost?: boolean }) {
   return (
-    <div className="flex flex-col items-center gap-1">
+    <div className="flex flex-col items-center gap-0.5">
       <button
         type="button"
         onClick={onClick}
         aria-label={isHost ? "End meeting for all" : "Leave meeting"}
-        className={`h-11 w-14 rounded-full flex items-center justify-center transition active:scale-90 ${
-          isHost 
-            ? "bg-red-600 hover:bg-red-500 text-white shadow-[0_0_24px_rgba(239,68,68,0.35)]" 
-            : "bg-white/10 border border-white/[0.08] text-white/60 hover:text-white hover:bg-white/20"
+        className={`h-10 w-12 rounded-full flex items-center justify-center transition active:scale-90 ${
+          isHost
+            ? "bg-red-600 hover:bg-red-500 text-white shadow-[0_0_20px_rgba(239,68,68,0.3)]"
+            : "bg-white/10 border border-white/[0.08] text-red-400 hover:bg-red-500/20"
         }`}
       >
         {isHost ? <IC.EndCall /> : <IC.Leave />}
       </button>
-      <span className="text-[9px] text-white/30 select-none">
-        {isHost ? "End for all" : "Leave"}
+      <span className="text-[9px] text-white/40 select-none mt-0.5">
+        {isHost ? "End" : "Leave"}
       </span>
     </div>
+  );
+}
+
+/* ── More bottom sheet (mobile) ────────────────────────────────────────── */
+function MoreSheet({
+  open, onClose, children,
+}: { open: boolean; onClose: () => void; children: ReactNode }) {
+  if (!open) return null;
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
+        onClick={onClose}
+      />
+      {/* Sheet */}
+      <div className="fixed bottom-[72px] inset-x-0 z-50 flex justify-center px-4 pb-2">
+        <div className="w-full max-w-xs rounded-2xl bg-[#1e2030] border border-white/10 p-4 shadow-2xl">
+          <div className="flex justify-center mb-3">
+            <div className="h-1 w-10 rounded-full bg-white/20" />
+          </div>
+          <div className="flex flex-wrap justify-center gap-3">
+            {children}
+          </div>
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -171,118 +211,185 @@ export function MeetingControls({
   viewMode = "grid", onToggleView,
   isHost = false, onEndMeeting, onLeave,
 }: Props) {
-  const room = useRoomContext();
+  useRoomContext();
   const { localParticipant, isMicrophoneEnabled, isCameraEnabled, isScreenShareEnabled } = useLocalParticipant();
   const [togglingMic, setTogglingMic] = useState(false);
   const [togglingCam, setTogglingCam] = useState(false);
   const [togglingScreen, setTogglingScreen] = useState(false);
   const [canScreenShare, setCanScreenShare] = useState(false);
   const [showMore, setShowMore] = useState(false);
-  const moreRef = useRef<HTMLDivElement>(null);
 
-  // Detect screen share capability (capability-based, not UA)
   useEffect(() => {
     setCanScreenShare(typeof navigator.mediaDevices?.getDisplayMedia === "function");
   }, []);
 
-  // Close "more" sheet on outside click
-  useEffect(() => {
-    if (!showMore) return;
-    const handler = (e: MouseEvent) => {
-      if (moreRef.current && !moreRef.current.contains(e.target as Node)) setShowMore(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [showMore]);
-
-  const report = useCallback((e: unknown) => onDeviceError?.(e instanceof Error ? e : new Error(String(e))), [onDeviceError]);
+  const report = useCallback(
+    (e: unknown) => onDeviceError?.(e instanceof Error ? e : new Error(String(e))),
+    [onDeviceError]
+  );
 
   const toggleMic = useCallback(async () => {
-    if (togglingMic) return; setTogglingMic(true);
+    if (togglingMic) return;
+    setTogglingMic(true);
     try { await localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled); onDeviceError?.(null); }
-    catch (e) { report(e); } finally { setTogglingMic(false); }
+    catch (e) { report(e); }
+    finally { setTogglingMic(false); }
   }, [isMicrophoneEnabled, togglingMic, report, localParticipant, onDeviceError]);
 
   const toggleCam = useCallback(async () => {
-    if (togglingCam) return; setTogglingCam(true);
+    if (togglingCam) return;
+    setTogglingCam(true);
     try { await localParticipant.setCameraEnabled(!isCameraEnabled); onDeviceError?.(null); }
-    catch (e) { report(e); } finally { setTogglingCam(false); }
+    catch (e) { report(e); }
+    finally { setTogglingCam(false); }
   }, [isCameraEnabled, togglingCam, report, localParticipant, onDeviceError]);
 
   const toggleScreen = useCallback(async () => {
-    if (togglingScreen || !canScreenShare) return; setTogglingScreen(true);
+    if (togglingScreen || !canScreenShare) return;
+    setTogglingScreen(true);
     try { await localParticipant.setScreenShareEnabled(!isScreenShareEnabled); onDeviceError?.(null); }
-    catch (e) { report(e); } finally { setTogglingScreen(false); }
+    catch (e) { report(e); }
+    finally { setTogglingScreen(false); }
   }, [isScreenShareEnabled, togglingScreen, canScreenShare, report, localParticipant, onDeviceError]);
 
-  /* ── Secondary controls ─ */
-  const secondaryControls = (
+  const handleLeaveClick = () => {
+    if (isHost) { onEndMeeting?.(); } else { onLeave?.(); }
+  };
+
+  /* Secondary controls (shown inline on desktop, in sheet on mobile) */
+  const secondaryControls = (compact = false) => (
     <>
       {canScreenShare && (
-        <Btn label={isScreenShareEnabled ? "Stop share" : "Share"} active={isScreenShareEnabled}
-          onClick={toggleScreen} disabled={togglingScreen} icon={<IC.Share />} />
+        <Btn
+          compact={compact}
+          label={isScreenShareEnabled ? "Stop" : "Share"}
+          active={isScreenShareEnabled}
+          onClick={() => { toggleScreen(); setShowMore(false); }}
+          disabled={togglingScreen}
+          icon={<IC.Share />}
+        />
       )}
-      <Btn label="People" active={activePanel === "participants"} onClick={() => { onTogglePanel?.("participants"); setShowMore(false); }} icon={<IC.People />} />
-      <Btn label="Chat" active={activePanel === "chat"} onClick={() => { onTogglePanel?.("chat"); setShowMore(false); }} icon={<IC.Chat />} />
-      <Btn label="Agenda" active={activePanel === "agenda"} onClick={() => { onTogglePanel?.("agenda"); setShowMore(false); }} icon={<IC.Agenda />} />
-      <Btn label="Captions" active={activePanel === "captions"} onClick={() => { onTogglePanel?.("captions"); setShowMore(false); }} icon={<IC.Captions />} />
-      <Btn label={viewMode === "grid" ? "Speaker" : "Grid"} onClick={() => { onToggleView?.(); setShowMore(false); }} icon={viewMode === "grid" ? <IC.Speaker /> : <IC.Grid />} />
-      <Btn label={isFullscreen ? "Exit full" : "Fullscreen"} onClick={() => { onToggleFullscreen?.(); setShowMore(false); }} icon={isFullscreen ? <IC.ExitFullscreen /> : <IC.Fullscreen />} />
+      <Btn
+        compact={compact}
+        label="People"
+        active={activePanel === "participants"}
+        onClick={() => { onTogglePanel?.("participants"); setShowMore(false); }}
+        icon={<IC.People />}
+      />
+      <Btn
+        compact={compact}
+        label="Chat"
+        active={activePanel === "chat"}
+        onClick={() => { onTogglePanel?.("chat"); setShowMore(false); }}
+        icon={<IC.Chat />}
+      />
+      <Btn
+        compact={compact}
+        label="Agenda"
+        active={activePanel === "agenda"}
+        onClick={() => { onTogglePanel?.("agenda"); setShowMore(false); }}
+        icon={<IC.Agenda />}
+      />
+      <Btn
+        compact={compact}
+        label="Captions"
+        active={activePanel === "captions"}
+        onClick={() => { onTogglePanel?.("captions"); setShowMore(false); }}
+        icon={<IC.Captions />}
+      />
+      <Btn
+        compact={compact}
+        label={viewMode === "grid" ? "Speaker" : "Grid"}
+        onClick={() => { onToggleView?.(); setShowMore(false); }}
+        icon={viewMode === "grid" ? <IC.Speaker /> : <IC.Grid />}
+      />
+      <Btn
+        compact={compact}
+        label={isFullscreen ? "Exit Full" : "Fullscreen"}
+        onClick={() => { onToggleFullscreen?.(); setShowMore(false); }}
+        icon={isFullscreen ? <IC.ExitFullscreen /> : <IC.Fullscreen />}
+      />
     </>
   );
 
-  const handleLeaveClick = () => {
-    if (isHost) {
-      onEndMeeting?.();
-    } else {
-      onLeave?.();
-    }
-  };
-
   return (
     <>
-      {/* ── Desktop controls bar ──────────────────────────────────────── */}
-      <div className="hidden sm:flex items-end gap-2 md:gap-3 bg-[#14151c]/80 backdrop-blur-2xl border border-white/[0.08] rounded-2xl px-4 md:px-5 py-3 shadow-[0_8px_40px_rgba(0,0,0,0.6)]">
-        <StartAudio className="hidden h-8 rounded-xl border border-white/10 bg-white/5 px-3 text-xs text-white/40" label="Unlock audio" />
-        <Btn label={togglingMic ? "…" : isMicrophoneEnabled ? "Mute" : "Unmute"} danger={!isMicrophoneEnabled}
-          onClick={toggleMic} disabled={togglingMic} icon={isMicrophoneEnabled ? <IC.MicOn /> : <IC.MicOff />} />
-        <Btn label={togglingCam ? "…" : isCameraEnabled ? "Stop video" : "Start video"} danger={!isCameraEnabled}
-          onClick={toggleCam} disabled={togglingCam} icon={isCameraEnabled ? <IC.CamOn /> : <IC.CamOff />} />
-        <div className="w-px h-9 bg-white/[0.06] mx-0.5 self-center" />
-        {secondaryControls}
-        <div className="w-px h-9 bg-white/[0.06] mx-0.5 self-center" />
-        <EndBtn onClick={handleLeaveClick} isHost={isHost} />
-      </div>
+      {/* ── Fixed bottom control bar ─────────────────────────────────── */}
+      <div className="fixed inset-x-0 bottom-0 z-40 flex justify-center items-center bg-[#111111]/95 border-t border-white/[0.07] backdrop-blur-md px-3 py-2">
 
-      {/* ── Mobile compact bar ────────────────────────────────────────── */}
-      <div className="flex sm:hidden items-end justify-center gap-2 bg-[#14151c]/90 backdrop-blur-2xl border border-white/[0.08] rounded-2xl px-3 py-2.5 shadow-[0_8px_40px_rgba(0,0,0,0.6)] max-w-full">
-        <Btn label={isMicrophoneEnabled ? "Mute" : "Unmute"} danger={!isMicrophoneEnabled}
-          onClick={toggleMic} disabled={togglingMic} icon={isMicrophoneEnabled ? <IC.MicOn /> : <IC.MicOff />} />
-        <Btn label={isCameraEnabled ? "Stop" : "Start"} danger={!isCameraEnabled}
-          onClick={toggleCam} disabled={togglingCam} icon={isCameraEnabled ? <IC.CamOn /> : <IC.CamOff />} />
+        {/* ── Mobile: compact pill — only essential buttons + More ── */}
+        <div className="flex sm:hidden items-center gap-2">
+          {/* Mic */}
+          <Btn
+            label={togglingMic ? "…" : isMicrophoneEnabled ? "Mute" : "Unmute"}
+            danger={!isMicrophoneEnabled}
+            active={isMicrophoneEnabled}
+            onClick={toggleMic}
+            disabled={togglingMic}
+            icon={isMicrophoneEnabled ? <IC.MicOn /> : <IC.MicOff />}
+          />
+          {/* Camera */}
+          <Btn
+            label={togglingCam ? "…" : isCameraEnabled ? "Stop" : "Start"}
+            danger={!isCameraEnabled}
+            active={isCameraEnabled}
+            onClick={toggleCam}
+            disabled={togglingCam}
+            icon={isCameraEnabled ? <IC.CamOn /> : <IC.CamOff />}
+          />
 
-        <div className="relative" ref={moreRef}>
-          <Btn label="More" active={showMore} onClick={() => setShowMore((v) => !v)} icon={<IC.More />} />
-          {showMore && (
-            <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-50 bg-[#1a1d27]/95 backdrop-blur-2xl border border-white/10 rounded-2xl p-3 shadow-2xl max-w-[calc(100vw-1.5rem)]">
-              <div className="grid grid-cols-3 gap-2 w-56 max-w-full">
-                {canScreenShare && (
-                  <Btn label={isScreenShareEnabled ? "Stop share" : "Share"} active={isScreenShareEnabled}
-                    onClick={toggleScreen} disabled={togglingScreen} icon={<IC.Share />} />
-                )}
-                <Btn label="People" active={activePanel === "participants"} onClick={() => { onTogglePanel?.("participants"); setShowMore(false); }} icon={<IC.People />} />
-                <Btn label="Chat" active={activePanel === "chat"} onClick={() => { onTogglePanel?.("chat"); setShowMore(false); }} icon={<IC.Chat />} />
-                <Btn label="Agenda" active={activePanel === "agenda"} onClick={() => { onTogglePanel?.("agenda"); setShowMore(false); }} icon={<IC.Agenda />} />
-                <Btn label="Captions" active={activePanel === "captions"} onClick={() => { onTogglePanel?.("captions"); setShowMore(false); }} icon={<IC.Captions />} />
-                <Btn label={viewMode === "grid" ? "Speaker" : "Grid"} onClick={() => { onToggleView?.(); setShowMore(false); }} icon={viewMode === "grid" ? <IC.Speaker /> : <IC.Grid />} />
-                <Btn label={isFullscreen ? "Exit" : "Fullscreen"} onClick={() => { onToggleFullscreen?.(); setShowMore(false); }} icon={isFullscreen ? <IC.ExitFullscreen /> : <IC.Fullscreen />} />
-              </div>
-            </div>
-          )}
+          <Divider />
+
+          {/* More — opens sheet */}
+          <Btn
+            label="More"
+            active={showMore}
+            onClick={() => setShowMore((v) => !v)}
+            icon={<IC.More />}
+          />
+
+          <Divider />
+
+          {/* Leave / End */}
+          <EndBtn onClick={handleLeaveClick} isHost={isHost} />
         </div>
 
-        <EndBtn onClick={handleLeaveClick} isHost={isHost} />
+        {/* ── Desktop: full pill with all buttons inline ──────────── */}
+        <div className="hidden sm:flex items-center gap-1.5 rounded-2xl bg-[#232530]/80 border border-white/10 px-4 py-2.5 shadow-xl">
+          {/* Mic */}
+          <Btn
+            label={togglingMic ? "…" : isMicrophoneEnabled ? "Mute" : "Unmute"}
+            danger={!isMicrophoneEnabled}
+            active={isMicrophoneEnabled}
+            onClick={toggleMic}
+            disabled={togglingMic}
+            icon={isMicrophoneEnabled ? <IC.MicOn /> : <IC.MicOff />}
+          />
+          {/* Camera */}
+          <Btn
+            label={togglingCam ? "…" : isCameraEnabled ? "Stop video" : "Start video"}
+            danger={!isCameraEnabled}
+            active={isCameraEnabled}
+            onClick={toggleCam}
+            disabled={togglingCam}
+            icon={isCameraEnabled ? <IC.CamOn /> : <IC.CamOff />}
+          />
+
+          <Divider />
+
+          {secondaryControls()}
+
+          <Divider />
+
+          {/* Leave / End */}
+          <EndBtn onClick={handleLeaveClick} isHost={isHost} />
+        </div>
       </div>
+
+      {/* ── Mobile More sheet ──────────────────────────────────────── */}
+      <MoreSheet open={showMore} onClose={() => setShowMore(false)}>
+        {secondaryControls(true)}
+      </MoreSheet>
     </>
   );
 }

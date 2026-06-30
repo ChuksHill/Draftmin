@@ -137,7 +137,7 @@ function DashboardShellInner({ children }: DashboardShellProps) {
             <span className="block h-0.5 w-5 bg-slate-600 rounded" />
             <span className="block h-0.5 w-5 bg-slate-600 rounded" />
           </button>
-          <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-600 grid place-items-center text-white font-bold text-sm shrink-0">E</div>
+          <div className="h-8 w-8 rounded-lg bg-[#0B5CFF] grid place-items-center text-white font-bold text-sm shrink-0">D</div>
           <span className="text-sm font-semibold text-slate-800 hidden sm:inline">Draftmin</span>
         </div>
 
@@ -152,7 +152,7 @@ function DashboardShellInner({ children }: DashboardShellProps) {
 
           {/* Account dropdown */}
           <div className="relative" ref={accountRef}>
-            <button type="button" onClick={() => setAccountOpen(v => !v)} className="h-9 w-9 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white grid place-items-center text-sm font-semibold hover:opacity-90 transition ring-2 ring-white" aria-label="Account menu">
+            <button type="button" onClick={() => setAccountOpen(v => !v)} className="h-9 w-9 rounded-xl bg-[#0B5CFF] text-white grid place-items-center text-sm font-semibold hover:opacity-90 transition ring-2 ring-white" aria-label="Account menu">
               {avatar}
             </button>
             {accountOpen && (
@@ -194,7 +194,7 @@ function DashboardShellInner({ children }: DashboardShellProps) {
       >
         <div className="flex items-center justify-between px-4 py-4 border-b border-slate-100">
           <div className="flex items-center gap-2">
-            <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-600 grid place-items-center text-white font-bold text-xs">D</div>
+            <div className="h-7 w-7 rounded-lg bg-[#0B5CFF] grid place-items-center text-white font-bold text-xs">D</div>
             <span className="text-sm font-semibold text-slate-800">Draftmin</span>
           </div>
           <button type="button" onClick={() => setSidebarOpen(false)} className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-slate-100 transition text-slate-400" aria-label="Close">
@@ -208,7 +208,7 @@ function DashboardShellInner({ children }: DashboardShellProps) {
         {/* Expanded user card */}
         <div className="px-3 py-4 border-t border-slate-100 space-y-2">
           <div className="flex items-center gap-3 rounded-xl bg-slate-50 border border-slate-100 px-3 py-3">
-            <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white grid place-items-center text-sm font-semibold shrink-0">{avatar}</div>
+            <div className="h-9 w-9 rounded-xl bg-[#0B5CFF] text-white grid place-items-center text-sm font-semibold shrink-0">{avatar}</div>
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold text-slate-800 truncate">{displayName || "Guest"}</p>
               <p className="text-[11px] text-slate-400 truncate">{user?.email ?? "Not signed in"}</p>
@@ -235,7 +235,7 @@ function DashboardShellInner({ children }: DashboardShellProps) {
           {/* Expanded user card */}
           <div className="px-3 pt-4 border-t border-slate-100 space-y-1">
             <div className="flex items-center gap-3 rounded-xl bg-slate-50 border border-slate-100 px-3 py-3 mb-2">
-              <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white grid place-items-center text-sm font-semibold shrink-0">{avatar}</div>
+              <div className="h-9 w-9 rounded-xl bg-[#0B5CFF] text-white grid place-items-center text-sm font-semibold shrink-0">{avatar}</div>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-semibold text-slate-800 truncate">{displayName || "Guest"}</p>
                 <p className="text-[11px] text-slate-400 truncate">{user?.email ?? "Not signed in"}</p>

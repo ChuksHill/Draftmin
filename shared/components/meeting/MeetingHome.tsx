@@ -114,7 +114,7 @@ function NewMeetingModal({ onClose }: { onClose: () => void }) {
       if (meetingId) {
         await supabase
           .from("meetings")
-          .update({ title, agenda: agenda.trim(), settings })
+          .update({ title, settings })
           .eq("id", meetingId);
         await supabase
           .from("meeting_agenda_items")
@@ -126,7 +126,6 @@ function NewMeetingModal({ onClose }: { onClose: () => void }) {
           .insert({
             room_name: slug,
             title,
-            agenda: agenda.trim(),
             host_id: user?.id ?? null,
             is_active: false,
             settings,
@@ -159,11 +158,10 @@ function NewMeetingModal({ onClose }: { onClose: () => void }) {
       setCreating(false);
     }
 
-    const params = new URLSearchParams({ host: "1", title, type: meetingType });
+    const savedName = window.localStorage.getItem("draftmin.displayName") || "Guest";
+    const params = new URLSearchParams({ name: savedName, mic: "1", cam: "1", host: "1", title, type: meetingType });
     if (agenda.trim()) params.set("agenda", agenda.trim());
-    router.push(
-      `/meeting/${encodeURIComponent(slug)}/prejoin?${params.toString()}`
-    );
+    router.push(`/meeting/${encodeURIComponent(slug)}?${params.toString()}`);
   };
 
   return (
@@ -671,9 +669,12 @@ function MeetingHomeInner() {
   const goToPrejoin = useCallback(
     (room: string) => {
       if (!room.trim()) return;
-      router.push(`/meeting/${encodeURIComponent(room.trim())}/prejoin`);
+      const savedName = window.localStorage.getItem("draftmin.displayName") || displayName || "Guest";
+      const savedType = window.localStorage.getItem("draftmin.meetingType") || "general";
+      const params = new URLSearchParams({ name: savedName, mic: "1", cam: "1", type: savedType });
+      router.push(`/meeting/${encodeURIComponent(room.trim())}?${params.toString()}`);
     },
-    [router]
+    [router, displayName]
   );
 
   // On mobile, nav links open a sub-panel instead of routing directly.

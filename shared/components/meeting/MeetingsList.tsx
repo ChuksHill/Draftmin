@@ -150,7 +150,12 @@ export function MeetingsList() {
               <div className="space-y-2">
                 {items.map(m => (
                   <button key={m.id} type="button"
-                    onClick={() => router.push(`/meeting/${encodeURIComponent(m.room_name)}/prejoin`)}
+                    onClick={() => {
+                      const savedName = window.localStorage.getItem("draftmin.displayName") || "Guest";
+                      const savedType = window.localStorage.getItem("draftmin.meetingType") || "general";
+                      const params = new URLSearchParams({ name: savedName, mic: "1", cam: "1", type: savedType });
+                      router.push(`/meeting/${encodeURIComponent(m.room_name)}?${params.toString()}`);
+                    }}
                     className="w-full flex items-center gap-4 p-4 rounded-2xl border border-slate-100 bg-white hover:border-blue-200 hover:bg-blue-50/40 transition group text-left">
                     {/* Icon */}
                     <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-blue-100 to-indigo-100 grid place-items-center shrink-0">
